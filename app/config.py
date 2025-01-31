@@ -22,7 +22,9 @@ class Config:
     # Solana
     SOLANA_RPC = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
     BASE_ASSET = "So11111111111111111111111111111111111111112"
-    JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
+    JUPITER_SWAP_URL = "https://api.jup.ag/swap/v1"
+    JUPITER_PRICE_URL = "https://api.jup.ag/price/v2"
+    JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", "")
     
     # Logging
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
