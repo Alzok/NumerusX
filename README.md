@@ -1,6 +1,6 @@
 # 📘 Documentation d'Installation du DEX Trading Bot
 
-![Logo](logo.webp)
+![Logo](logo.jpg)
 
 ## Prérequis
 
