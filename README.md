@@ -1,160 +1,159 @@
-# 📘 Documentation d'Installation du bot NumerusX
+# Documentation Technique - NumerusX Bot
 
 ![Logo](logo.jpg)
 
-## Prérequis
-
-### 🖥️ Configuration Système
-- **Système d'exploitation** : Windows 10+, macOS 10.15+, Ubuntu 20.04+
-- **Python** : 3.10 ou supérieur ([Télécharger Python](https://www.python.org/downloads/))
-- **Git** ([Guide d'installation](https://git-scm.com/book/fr/v2/D%C3%A9marrage-rapide-Installation-de-Git))
-
-### 🔑 Clés API Requises
-
-| Service      | Lien d'Obtention |
-|-------------|------------------|
-| Infura      | [https://infura.io/register](https://infura.io/register) |
-| Etherscan   | [https://etherscan.io/apis](https://etherscan.io/apis) |
-| Banana Gun  | [https://bananagun.io/api](https://bananagun.io/api) |
-| Telegram Bot | [https://t.me/BotFather](https://t.me/BotFather) |
+## Fonctionnalités Clés
+- **Analyse en Temps Réel**  
+  Surveillance des paires DEX via Dexscreener (prix, volume, liquidité)
+- **Détection de Risques**  
+  Vérification Rugcheck + filtrage automatique des tokens à risque
+- **Stratégie de Trading**  
+  Combinaison RSI/MACD/Ichimoku avec seuils configurables
+- **Exécution Cross-Plateforme**  
+  Support CEX (Binance, KuCoin) et DEX (Uniswap, PancakeSwap)
+- **Journalisation Avancée**  
+  Stockage structuré des logs (fichier + console)
 
 ---
 
-## 🛠 Installation Pas à Pas
+## Prérequis Techniques
+
+### Services Externes
+| Service | Lien | Obligatoire |
+|---------|------|-------------|
+| Dexscreener | [API Docs](https://docs.dexscreener.com/) | ✅ |
+| Rugcheck | [API Access](https://rugcheck.xyz/api) | ✅ |
+| CEX (Binance/KuCoin) | [API Management](https://www.binance.com/en/support/faq/360002502072) | ✅ |
+| Telegram (Optionnel) | [Bot Father](https://t.me/BotFather) | ❌ |
+
+---
+
+## Installation
 
 ### 1. Cloner le Dépôt
-
 ```bash
 git clone https://github.com/Alzok/NumerusX.git
-cd NumerusX
+cd numerusx
 ```
 
-### 2. Configurer l'Environnement Virtuel
-
-#### Linux/macOS :
-
+### 2. Configuration Docker
 ```bash
-python -m venv venv
-source venv/bin/activate
+# Construire l'image
+docker-compose build
+
+# Démarrer le conteneur
+docker-compose up -d
 ```
 
-#### Windows :
-
-```cmd
-python -m venv venv
-venv\Scripts\activate
-```
-
-### 3. Installer les Dépendances
-
-```bash
-pip install -r requirements.txt
-```
-
-## 🔧 Configuration
-
-### 1. Fichier d'Environnement
-
+### 3. Fichier d'Environnement
 ```bash
 cp .env.example .env
+nano .env  # Remplir avec vos clés
 ```
-
-Remplir `.env` avec vos clés :
-
+Variables obligatoires :
 ```ini
-TELEGRAM_TOKEN="123456:ABC-DEF..."
-BANANA_GUN_KEY="bg_live_votre_clé"
-INFURA_KEY="votre_clé_infura"
+RUGCHECK_API_KEY="votre_clé"
+CEX_API_KEY="votre_clé_binance"
+CEX_API_SECRET="votre_secret_binance"
 ```
-
-### 2. Initialiser la Base de Données
-
-```bash
-sqlite3 dex_analytics.db < schema.sql
-```
-
-## 🤖 Configuration Telegram
-
-### 1. Créer un Bot
-
-- Ouvrez [@BotFather](https://t.me/BotFather) sur Telegram
-- Envoyez `/newbot` et suivez les instructions
-- Copiez le token dans `.env`
-
-### 2. Obtenir le Chat ID
-
-- Ajoutez le bot à un canal/groupe
-- Envoyez un message
-- Exécutez :
-
-```bash
-curl https://api.telegram.org/bot$TELEGRAM_TOKEN/getUpdates
-```
-
-- Cherchez `"id":-10012345...` dans la réponse
-
-## 🚀 Lancer le Bot
-
-### Mode Démo (Sans Trading Réel)
-
-```bash
-python dex_bot.py --demo
-```
-
-### Mode Production
-
-```bash
-nohup python dex_bot.py >> trading.log 2>&1 &
-```
-
-### Vérifier les Logs
-
-```bash
-tail -f trading.log
-```
-
-## 🛡️ Recommandations de Sécurité
-
-### Clés API :
-- Ne jamais commiter `.env`
-- Utiliser des clés avec permissions minimales
-
-### VPN :
-- Toujours actif pendant l'exécution
-
-### Backups :
-- Automatiser les backups de `dex_analytics.db`
-
-```bash
-0 3 * * * cp dex_analytics.db backups/$(date +\%Y\%m\%d).db
-```
-
-## 🔍 Dépannage
-
-### Problèmes Courants
-
-| Symptôme                  | Solution |
-|---------------------------|----------|
-| API Error 429             | Réduire la fréquence des requêtes |
-| Database Locked           | Redémarrer le bot |
-| Invalid Telegram Token    | Vérifier le format `123456:ABC-DEF...` |
-
-### Commandes Utiles
-
-```bash
-# Vérifier l'intégrité de la DB
-sqlite3 dex_analytics.db "PRAGMA integrity_check"
-
-# Forcer un reload des blacklists
-pkill -SIGHUP -f dex_bot.py
-```
-
-## 📚 Ressources Complémentaires
-
-- [Documentation Banana Gun](https://bananagun.io/docs)
-- [Guide DexScreener API](https://docs.dexscreener.com/)
-- [Support Technique](https://support.dextradingbot.com)
 
 ---
 
-✅ **Installation Terminée !** Le bot est maintenant prêt à analyser les marchés et exécuter des trades sécurisés.
+## Configuration
+
+### Fichiers Importants
+| Fichier | Description |
+|---------|------------|
+| `config.py` | Paramètres généraux (intervalles, seuils) |
+| `schema.sql` | Structure de la base de données |
+| `data/trading.log` | Journal des opérations |
+
+### Options Principales
+```python
+# Dans config.py
+UPDATE_INTERVAL = 60  # Analyse toutes les 60s
+RISK_PER_TRADE = 0.02  # 2% du capital par trade
+BLACKLIST_THRESHOLD = 0.25  # 25%+ = supply suspecte
+```
+
+---
+
+## Exécution
+
+### Commandes Docker
+```bash
+# Démarrer/Arrêter
+docker-compose start
+docker-compose stop
+
+# Voir les logs
+docker-compose logs -f
+
+# Mise à jour
+docker-compose pull && docker-compose up -d
+```
+
+### Commandes CLI (Sans Docker)
+```bash
+# Installer les dépendances
+pip install -r requirements.txt
+
+# Lancer le bot
+python app/main.py
+
+# Vérifier la base de données
+sqlite3 data/dex_data.db "PRAGMA integrity_check"
+```
+
+---
+
+## Services Externes
+
+### Obtenir les Clés API
+
+#### Dexscreener
+Aucune clé nécessaire pour l'API publique
+
+#### Rugcheck
+Créer un compte sur [rugcheck.xyz](https://rugcheck.xyz) > Section Développeur
+
+#### Exchanges CEX
+- [Binance : API Management](https://www.binance.com/en/support/faq/360002502072)
+- [KuCoin : API Creation](https://www.kucoin.com/account/api)
+
+---
+
+## Dépannage
+
+### Problèmes Fréquents
+| Symptôme | Solution |
+|----------|---------|
+| 403 Forbidden sur Rugcheck | Vérifier la clé API + quota |
+| Erreurs CCXT | Redémarrer le bot + vérifier les permissions API |
+| Base de données verrouillée | `docker-compose restart` |
+| Latence élevée | Augmenter `UPDATE_INTERVAL` dans `config.py` |
+
+### Vérifier l'État du Système
+```bash
+# Tester Dexscreener
+curl https://api.dexscreener.com/latest/dex/pairs/ethereum/0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640
+
+# Tester Rugcheck
+curl -H "x-api-key: $RUGCHECK_API_KEY" https://api.rugcheck.xyz/v1/contracts/0x.../score
+```
+
+---
+
+## Recommandations de Sécurité
+- **VPN** : Toujours actif pendant l'exécution
+- **Clés API** : Permissions minimales (read + trade only)
+- **Backups** : Automatiser la copie de `data/dex_data.db`
+- **Monitoring** : Surveiller `data/trading.log` quotidiennement
+
+---
+
+## Ressources Utiles
+- [Code Source](https://github.com/votre-utilisateur/numerusx)
+- [Documentation Dexscreener](https://docs.dexscreener.com/)
+- [Documentation CCXT](https://docs.ccxt.com)
+- [API Rugcheck](https://rugcheck.xyz/api)

@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  numerusx:
+    build: .
+    container_name: numerusx
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env

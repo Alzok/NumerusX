@@ -1,5 +1,0 @@
-banana-gun-sdk>=2.4.0
-python-telegram-bot==20.3
-web3==6.4.0
-cryptography==41.0.3
-tenacity==8.2.3

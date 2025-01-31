@@ -1,1 +1,9 @@
+# Fichiers sensibles
 .env
+data/
+*.db
+*.log
+
+# Environnements virtuels
+venv/
+.env/
