@@ -24,7 +24,6 @@
 | Dexscreener | [API Docs](https://docs.dexscreener.com/) | ✅ |
 | Rugcheck | [API Access](https://rugcheck.xyz/api) | ✅ |
 | CEX (Binance/KuCoin) | [API Management](https://www.binance.com/en/support/faq/360002502072) | ✅ |
-| Telegram (Optionnel) | [Bot Father](https://t.me/BotFather) | ❌ |
 
 ---
 
