@@ -7,3 +7,5 @@ data/
 # Environnements virtuels
 venv/
 .env/
+
+config/.env

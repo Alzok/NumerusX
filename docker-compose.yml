@@ -1,11 +1,26 @@
 services:
   numerusx:
-    build: .
+    build: 
+      context: .
+      args:
+        ENVIRONMENT: dev
     container_name: numerusx
     restart: unless-stopped
     volumes:
       - ./data:/app/data
+      - ./config:/app/config:ro
     ports:
       - "8080:8080"
     env_file:
       - .env
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          memory: 512M
+
+volumes:
+  data:
+  config:

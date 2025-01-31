@@ -1,158 +1,128 @@
-# Documentation Technique - NumerusX Bot
-
 ![Logo](logo.jpg)
 
-## Fonctionnalités Clés
-- **Analyse en Temps Réel**  
-  Surveillance des paires DEX via Dexscreener (prix, volume, liquidité)
-- **Détection de Risques**  
-  Vérification Rugcheck + filtrage automatique des tokens à risque
-- **Stratégie de Trading**  
-  Combinaison RSI/MACD/Ichimoku avec seuils configurables
-- **Exécution Cross-Plateforme**  
-  Support CEX (Binance, KuCoin) et DEX (Uniswap, PancakeSwap)
-- **Journalisation Avancée**  
-  Stockage structuré des logs (fichier + console)
+# NumerusX Documentation - Solana Trading Bot
 
----
+![Architecture Overview](https://via.placeholder.com/800x400.png?text=NumerusX+Architecture)
 
-## Prérequis Techniques
+## 📖 Introduction
+**NumerusX** is an advanced algorithmic trading bot for Solana DEX, combining:
+- Multi-protocol analysis (Jupiter + Raydium)
+- Real-time risk detection
+- Web control interface
+- Automated portfolio management
 
-### Services Externes
-| Service | Lien | Obligatoire |
-|---------|------|-------------|
-| Dexscreener | [API Docs](https://docs.dexscreener.com/) | ✅ |
-| Rugcheck | [API Access](https://rugcheck.xyz/api) | ✅ |
-| CEX (Binance/KuCoin) | [API Management](https://www.binance.com/en/support/faq/360002502072) | ✅ |
+## 🚀 Key Features
+- 🛡️ Multi-layer security verification
+- 📈 Strategy based on 12 technical indicators
+- 🔄 Automatic transaction fee optimization
+- 📊 Real-time performance dashboard
+- 🚨 Intelligent emergency stop system
 
----
+## 🛠 Installation
 
-## Installation
+### Prerequisites
+- Docker 20.10+
+- Docker Compose 2.20+
+- Solana API Key (optional)
 
-### 1. Cloner le Dépôt
+### Installation via Docker
 ```bash
-git clone https://github.com/Alzok/NumerusX.git
+git clone https://github.com/your-repo/numerusx.git
 cd numerusx
+mkdir -p data config
+docker-compose up --build
 ```
 
-### 2. Configuration Docker
+### Key Generation
 ```bash
-# Construire l'image
-docker-compose build
+# Generate encryption key
+python3 -c "from cryptography.fernet import Fernet; print(f'ENCRYPTION_KEY={Fernet.generate_key().decode()}')" > .env
 
-# Démarrer le conteneur
-docker-compose up -d
+# Encrypt Solana private key
+echo "ENCRYPTED_SOLANA_PK=$(python3 -c 'from cryptography.fernet import Fernet; import os; key = os.getenv("ENCRYPTION_KEY"); print(Fernet(key).encrypt(b"YOUR_PRIVATE_KEY").decode())')" >> .env
 ```
 
-### 3. Fichier d'Environnement
-```bash
-cp .env.example .env
-nano .env  # Remplir avec vos clés
-```
-Variables obligatoires :
-```ini
-RUGCHECK_API_KEY="votre_clé"
-CEX_API_KEY="votre_clé_binance"
-CEX_API_SECRET="votre_secret_binance"
-```
+## ⚙ Configuration
 
----
+### Environment Variables
 
-## Configuration
+| Variable | Description | Default Value |
+|----------|------------|---------------|
+| SOLANA_RPC_URL | Solana RPC URL | https://api.mainnet-beta.solana.com |
+| ENCRYPTION_KEY | Fernet encryption key | - |
+| ENCRYPTED_SOLANA_PK | Encrypted private key | - |
+| LOG_LEVEL | Logging level | INFO |
 
-### Fichiers Importants
-| Fichier | Description |
-|---------|------------|
-| `config.py` | Paramètres généraux (intervalles, seuils) |
-| `schema.sql` | Structure de la base de données |
-| `data/trading.log` | Journal des opérations |
+### `config.py` File
 
-### Options Principales
+#### Main Parameters:
 ```python
-# Dans config.py
-UPDATE_INTERVAL = 60  # Analyse toutes les 60s
-RISK_PER_TRADE = 0.02  # 2% du capital par trade
-BLACKLIST_THRESHOLD = 0.25  # 25%+ = supply suspecte
+TRADE_THRESHOLD = 0.65  # Trade activation threshold
+SCORE_WEIGHTS = (0.4, 0.3, 0.2, 0.1)  # Indicator weightings
+MAX_POSITIONS = 5  # Maximum number of open positions
 ```
 
----
+## 🏗 Architecture
 
-## Exécution
-
-### Commandes Docker
-```bash
-# Démarrer/Arrêter
-docker-compose start
-docker-compose stop
-
-# Voir les logs
-docker-compose logs -f
-
-# Mise à jour
-docker-compose pull && docker-compose up -d
+```mermaid
+graph TD
+    A[Web Interface] --> B[DexBot]
+    B --> C{Security Analysis}
+    C -->|Validated| D[Trading Strategy]
+    C -->|Rejected| E[Blacklist]
+    D --> F[Execution Optimization]
+    F --> G[Jupiter/Raydium]
+    G --> H[Performance Monitoring]
 ```
 
-### Commandes CLI (Sans Docker)
-```bash
-# Installer les dépendances
-pip install -r requirements.txt
+## 📦 Main Modules
 
-# Lancer le bot
-python app/main.py
+### 1. DexBot (`dex_bot.py`)
+- Main trading loop
+- Risk management
+- Module coordination
 
-# Vérifier la base de données
-sqlite3 data/dex_data.db "PRAGMA integrity_check"
+#### Workflow:
+1. Pair retrieval
+2. Security filtering
+3. Technical analysis
+4. Optimized execution
+
+### 2. Execution Engine (`trading_engine.py`)
+#### Features:
+- Multi-protocol price comparison
+- Secure key management
+- Real-time fee estimation
+
+```python
+engine = SolanaTradingEnginePro()
+engine.execute_swap(SOL, USDC, 100)  # Example swap
 ```
 
----
+### 3. Technical Analysis (`analytics_engine.py`)
+#### Implemented Indicators:
+- RSI (14 periods)
+- MACD (26/12/9)
+- ATR (14 periods)
+- Market structure
+- Volume analysis
 
-## Services Externes
+### 4. Security (`security.py`)
+#### Checks:
+- Jupiter strict list verification
+- On-chain liquidity analysis
+- Rug pull detection
+- Holder monitoring
 
-### Obtenir les Clés API
+## 🔒 Security & Monitoring
 
-#### Dexscreener
-Aucune clé nécessaire pour l'API publique
+### Security Measures
+- AES-256 key encryption
+- Automatic blacklist
+- Position limits
+- Balance verification
 
-#### Rugcheck
-Créer un compte sur [rugcheck.xyz](https://rugcheck.xyz) > Section Développeur
-
-#### Exchanges CEX
-- [Binance : API Management](https://www.binance.com/en/support/faq/360002502072)
-- [KuCoin : API Creation](https://www.kucoin.com/account/api)
-
----
-
-## Dépannage
-
-### Problèmes Fréquents
-| Symptôme | Solution |
-|----------|---------|
-| 403 Forbidden sur Rugcheck | Vérifier la clé API + quota |
-| Erreurs CCXT | Redémarrer le bot + vérifier les permissions API |
-| Base de données verrouillée | `docker-compose restart` |
-| Latence élevée | Augmenter `UPDATE_INTERVAL` dans `config.py` |
-
-### Vérifier l'État du Système
-```bash
-# Tester Dexscreener
-curl https://api.dexscreener.com/latest/dex/pairs/ethereum/0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640
-
-# Tester Rugcheck
-curl -H "x-api-key: $RUGCHECK_API_KEY" https://api.rugcheck.xyz/v1/contracts/0x.../score
-```
-
----
-
-## Recommandations de Sécurité
-- **VPN** : Toujours actif pendant l'exécution
-- **Clés API** : Permissions minimales (read + trade only)
-- **Backups** : Automatiser la copie de `data/dex_data.db`
-- **Monitoring** : Surveiller `data/trading.log` quotidiennement
-
----
-
-## Ressources Utiles
-- [Code Source](https://github.com/votre-utilisateur/numerusx)
-- [Documentation Dexscreener](https://docs.dexscreener.com/)
-- [Documentation CCXT](https://docs.ccxt.com)
-- [API Rugcheck](https://rugcheck.xyz/api)
+### Monitoring
+- **Web interface**: http://localhost:8080
+- **Log files**: `data/dex_bot.log`
+- **Prometheus metrics** (port 9090)
