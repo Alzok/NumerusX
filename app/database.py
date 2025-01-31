@@ -2,6 +2,7 @@ import sqlite3
 import json
 from config import Config
 import logging
+from typing import List, Dict
 
 class EnhancedDatabase:
     def __init__(self):
@@ -11,38 +12,25 @@ class EnhancedDatabase:
 
     def _init_db(self):
         with self.conn:
-            try:
-                self.conn.executescript('''
-                    CREATE TABLE IF NOT EXISTS blacklist (
-                        address TEXT PRIMARY KEY,
-                        reason TEXT,
-                        metadata TEXT,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                    );
-                    
-                    CREATE INDEX IF NOT EXISTS idx_bl_timestamp ON blacklist(timestamp);
-                    
-                    CREATE TABLE IF NOT EXISTS token_metrics (
-                        address TEXT,
-                        timestamp DATETIME,
-                        price REAL,
-                        liquidity REAL,
-                        volume REAL,
-                        PRIMARY KEY (address, timestamp)
-                    );
-                    
-                    CREATE INDEX IF NOT EXISTS idx_tm_address ON token_metrics(address);
-                    
-                    CREATE TABLE IF NOT EXISTS trades (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        pair_address TEXT,
-                        amount REAL,
-                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        status TEXT
-                    );
-                ''')
-            except sqlite3.Error as e:
-                self.logger.error(f"Erreur d'initialisation DB: {str(e)}")
+            self.conn.executescript('''
+                CREATE TABLE IF NOT EXISTS blacklist (
+                    address TEXT PRIMARY KEY,
+                    reason TEXT,
+                    metadata TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pair_address TEXT,
+                    amount REAL,
+                    entry_price REAL,
+                    status TEXT DEFAULT 'open',
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+                
+                CREATE INDEX idx_trades_status ON trades(status);
+            ''')
 
     def add_blacklist(self, address: str, reason: str, metadata: dict):
         try:
@@ -64,14 +52,30 @@ class EnhancedDatabase:
     def record_trade(self, trade_data: dict):
         try:
             self.conn.execute('''
-                INSERT INTO trades (pair_address, amount, status)
+                INSERT INTO trades (pair_address, amount, entry_price)
                 VALUES (?, ?, ?)
-            ''', (trade_data['pair'], trade_data['amount'], 'open'))
+            ''', (
+                trade_data['pair'],
+                trade_data['amount'],
+                trade_data['entry_price']
+            ))
             self.conn.commit()
         except sqlite3.Error as e:
-            self.logger.error(f"Erreur d'enregistrement trade: {str(e)}")
+            self.logger.error(f"Erreur d'enregistrement: {str(e)}")
 
-    def get_active_trades(self):
-        return self.conn.execute(
-            'SELECT * FROM trades WHERE status = "open"'
-        ).fetchall()
+    def get_active_trades(self) -> List[Dict]:
+        cursor = self.conn.execute('''
+            SELECT 
+                id,
+                pair_address,
+                amount,
+                entry_price,
+                timestamp 
+            FROM trades 
+            WHERE status = 'open'
+        ''')
+        return [dict(row) for row in cursor.fetchall()]
+
+    @property
+    def blacklist_count(self) -> int:
+        return self.conn.execute('SELECT COUNT(*) FROM blacklist').fetchone()[0]
