@@ -1,4 +1,4 @@
-# 📘 Documentation d'Installation du DEX Trading Bot
+# 📘 Documentation d'Installation du bot NumerusX
 
 ![Logo](logo.jpg)
 
@@ -25,8 +25,8 @@
 ### 1. Cloner le Dépôt
 
 ```bash
-git clone https://github.com/votre-utilisateur/dex-trading-bot.git
-cd dex-trading-bot
+git clone https://github.com/Alzok/NumerusX.git
+cd NumerusX
 ```
 
 ### 2. Configurer l'Environnement Virtuel

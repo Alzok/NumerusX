@@ -1,17 +1,17 @@
-from telegram import Bot, Update
+from telegram import Update, Bot
 from telegram.ext import Updater, CommandHandler
-import logging
-from config import Config
 
-class TelegramBot:
+class TelegramInterface:
     def __init__(self):
         self.bot = Bot(token=Config.TG_TOKEN)
         self.updater = Updater(token=Config.TG_TOKEN)
-        self._setup_handlers()
+        
+    def alert(self, message):
+        self.bot.send_message(
+            chat_id=Config.TG_CHAT_ID,
+            text=f"🚨 {message}",
+            parse_mode="Markdown"
+        )
     
-    def _setup_handlers(self):
-        # Configuration des commandes
-        pass
-    
-    def send_alert(self, message):
-        pass
+    def start(self):
+        self.updater.start_polling()
