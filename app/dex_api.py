@@ -1,91 +1,112 @@
 import requests
 from cachetools import TTLCache
-from tenacity import retry, wait_exponential, stop_after_attempt
+from tenacity import retry, stop_after_attempt, wait_exponential
 import logging
+from typing import Dict, List
 from config import Config
-import json
 
 class DexAPI:
     def __init__(self):
-        self.cache = TTLCache(maxsize=500, ttl=300)
+        self.cache = TTLCache(maxsize=1000, ttl=600)  # Cache augmenté
         self.logger = logging.getLogger('DexAPI')
-        self.headers = {
-            "Authorization": f"Bearer {Config.JUPITER_API_KEY}",
-            "Content-Type": "application/json"
-        } if Config.JUPITER_API_KEY else {}
+        self.headers = {"Authorization": f"Bearer {Config.JUPITER_API_KEY}"} if Config.JUPITER_API_KEY else {}
 
-    @retry(
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        stop=stop_after_attempt(3),
-        reraise=True
-    )
-    def get_solana_pairs(self):
-        """Récupère les paires Solana avec cache et gestion d'erreurs"""
-        cache_key = 'solana_pairs'
-        if cache_key in self.cache:
-            return self.cache[cache_key]
-
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def get_solana_pairs(self) -> List[Dict]:
+        """Récupération robuste des paires avec cache et fallback"""
         try:
-            response = requests.get(
-                "https://api.jup.ag/tokens/v1/mints/tradable",
+            if 'solana_pairs' in self.cache:
+                return self.cache['solana_pairs']
+
+            # Essayer Jupiter d'abord
+            jup_pairs = requests.get(
+                f"{Config.JUPITER_SWAP_URL}/tokens",
                 headers=self.headers,
                 timeout=15
-            )
-            response.raise_for_status()
+            ).json().get('tokens', [])
             
-            pairs = response.json()['mints']
-            self.cache[cache_key] = pairs
+            if jup_pairs:
+                self.cache['solana_pairs'] = jup_pairs
+                return jup_pairs
+
+            # Fallback sur DexScreener
+            dex_data = requests.get("https://api.dexscreener.com/latest/dex/chains/solana", timeout=10).json()
+            pairs = dex_data.get('pairs', [])
+            self.cache['solana_pairs'] = pairs
             return pairs
 
-        except requests.RequestException as e:
-            self.logger.error(f"Erreur API: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Erreur récupération paires: {str(e)}")
             return []
 
-    def get_historical_data(self, pair_address: str):
-        """Récupère les données historiques avec cache"""
-        cache_key = f"history_{pair_address}"
-        if cache_key in self.cache:
-            return self.cache[cache_key]
-
-        try:
-            response = requests.get(
-                f"https://api.jup.ag/price/v2/{pair_address}",
-                params={'range': '24H'},
-                headers=self.headers,
-                timeout=10
-            )
-            data = response.json()
-            self.cache[cache_key] = data
-            return data
-        except Exception as e:
-            self.logger.error(f"Erreur historique: {str(e)}")
-            return {}
-
-    @retry(
-        wait=wait_exponential(multiplier=1, min=1, max=5),
-        stop=stop_after_attempt(2)
-    )
-    def get_quote(self, mint_in: str, mint_out: str, amount: int):
-        """Obtient un devis de swap avec gestion de rate limits"""
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
+    def get_jupiter_quote(self, input_mint: str, output_mint: str, amount: int) -> Dict:
+        """Gestion complète des erreurs Jupiter API v1"""
         try:
             response = requests.get(
                 f"{Config.JUPITER_SWAP_URL}/quote",
                 params={
-                    "inputMint": mint_in,
-                    "outputMint": mint_out,
-                    "amount": amount,
-                    "slippageBps": int(Config.SLIPPAGE * 100)
+                    "inputMint": input_mint,
+                    "outputMint": output_mint,
+                    "amount": str(amount),
+                    "slippageBps": str(int(Config.SLIPPAGE * 10000)),
+                    "onlyDirectRoutes": "false"
                 },
                 headers=self.headers,
-                timeout=10
+                timeout=20
             )
             
             if response.status_code == 429:
-                raise requests.exceptions.HTTPError("Rate limit exceeded")
+                raise requests.exceptions.HTTPError("Rate limit dépassé")
                 
             response.raise_for_status()
             return response.json()
             
-        except requests.HTTPError as e:
-            self.logger.warning(f"Erreur API: {str(e)}")
-            return None
+        except requests.RequestException as e:
+            self.logger.error(f"Erreur Jupiter API: {e.response.text if e.response else str(e)}")
+            return {}
+
+    def get_historical_data(self, pair_address: str) -> Dict:
+        """Données hybrides avec conversion de format automatique"""
+        try:
+            # Priorité à Jupiter
+            jup_data = requests.get(
+                f"{Config.JUPITER_PRICE_URL}/id/{pair_address}",
+                headers=self.headers,
+                timeout=15
+            ).json()
+            
+            if jup_data.get('data'):
+                return self._convert_jupiter_format(jup_data['data'])
+                
+            # Fallback DexScreener
+            dex_data = requests.get(
+                f"https://api.dexscreener.com/latest/dex/pairs/solana/{pair_address}",
+                timeout=10
+            ).json()
+            return self._convert_dexscreener_format(dex_data)
+            
+        except Exception as e:
+            self.logger.error(f"Erreur données historiques: {str(e)}")
+            return {}
+
+    def _convert_jupiter_format(self, data: Dict) -> Dict:
+        """Adaptation du format Jupiter au schéma standard"""
+        return {
+            'pairAddress': data.get('id'),
+            'baseToken': {'address': data.get('mint')},
+            'priceUsd': data.get('price'),
+            'liquidity': {'usd': data.get('liquidity')},
+            'volume': {'h24': data.get('volume24h')}
+        }
+
+    def _convert_dexscreener_format(self, data: Dict) -> Dict:
+        """Normalisation des données DexScreener"""
+        pair = data.get('pair', {})
+        return {
+            'pairAddress': pair.get('address'),
+            'baseToken': {'address': pair.get('baseToken', {}).get('address')},
+            'priceUsd': pair.get('priceUsd'),
+            'liquidity': {'usd': pair.get('liquidity', {}).get('usd')},
+            'volume': {'h24': pair.get('volume', {}).get('h24')}
+        }

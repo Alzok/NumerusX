@@ -16,11 +16,12 @@ class PortfolioManager:
     def get_available_funds(self) -> float:
         return max(0, self.current_balance - sum(t['amount'] for t in self.db.get_active_trades()))
 
-    def update_exposure(self, pair: Dict, amount: float):
+    def update_exposure(self, pair: Dict, amount: float, protocol: str):
         self.db.record_trade({
             'pair': pair['address'],
             'amount': amount,
-            'entry_price': pair['priceUsd']
+            'entry_price': pair.get('priceUsd', pair.get('price', 0.0)),
+            'protocol': protocol
         })
         self.current_balance -= amount
 
@@ -28,10 +29,10 @@ class RiskEngine:
     def __init__(self):
         self.max_exposure = 20  # %
         self.auto_stop_loss = True
-        self.current_risk = 0
 
     def check_liquidity(self, pair: Dict) -> bool:
-        return pair['liquidity']['usd'] > Config.MIN_LIQUIDITY
+        liquidity = pair.get('liquidity', {}).get('usd') or pair.get('liquidity')
+        return liquidity > Config.MIN_LIQUIDITY
 
 class DexBot:
     def __init__(self):
@@ -43,20 +44,14 @@ class DexBot:
         self.portfolio = PortfolioManager()
         self.risk_engine = RiskEngine()
         self.active = False
-        self.speed = 3
-        self.performance = PerformanceMonitor()
-
-    @property
-    def active_trades(self) -> List[Dict]:
-        return self.db.get_active_trades()
 
     def run(self):
         self.active = True
-        self.logger.logger.info("Démarrage du bot")
+        self.logger.logger.info("Démarrage du bot...")
         while self.active:
             try:
                 self._run_cycle()
-                time.sleep(Config.UPDATE_INTERVAL / self.speed)
+                time.sleep(Config.UPDATE_INTERVAL)
             except KeyboardInterrupt:
                 self.stop()
 
@@ -67,42 +62,42 @@ class DexBot:
         self._execute_signals(signals)
 
     def _security_check(self, pair: Dict) -> bool:
+        base_token = pair.get('baseToken', {}).get('address') or pair.get('mint')
         return all([
-            self.security.verify_token(pair['baseToken']['address'])[0],
+            self.security.verify_token(base_token)[0],
             self.risk_engine.check_liquidity(pair),
             not self.portfolio.db.is_blacklisted(pair['address'])
         ])
 
-    def _analyze_pairs(self, pairs: List[Dict]) -> List[Dict]:
-        return [
-            p for p in pairs
-            if self.strategy.generate_signal(
-                self.strategy.analyze(
-                    self.dex_api.get_historical_data(p['address'])
-                )
-            ) == 'buy'
-        ]
+    def _analyze_pairs(self, pairs: List[Dict]) -> List[tuple]:
+        analyzed = []
+        for p in pairs:
+            data = self.dex_api.get_historical_data(p['address'])
+            analysis = self.strategy.analyze(data)
+            if self.strategy.generate_signal(analysis) == 'buy':
+                analyzed.append((p, analysis['momentum']))
+        return sorted(analyzed, key=lambda x: x[1], reverse=True)
 
-    def _execute_signals(self, signals: List[Dict]):
-        for signal in signals[:Config.MAX_POSITIONS]:
+    def _execute_signals(self, signals: List[tuple]):
+        for pair, score in signals[:Config.MAX_POSITIONS]:
             try:
-                amount = min(
-                    self.portfolio.get_available_funds() * 0.1,
-                    Config.MAX_ORDER_SIZE
-                )
+                amount = min(self.portfolio.get_available_funds() * 0.1, Config.MAX_ORDER_SIZE)
+                
+                # Détection du protocole
+                protocol = 'jupiter' if 'route' in pair else 'raydium'
                 self.trader.execute_swap(
                     Config.BASE_ASSET,
-                    signal['baseToken']['address'],
+                    pair.get('baseToken', {}).get('address') or pair['mint'],
                     amount
                 )
-                self.portfolio.update_exposure(signal, amount)
-                self.performance.track('trade', amount)
+                self.portfolio.update_exposure(pair, amount, protocol)
+                
             except Exception as e:
-                self.logger.log_error('execution', e)
+                self.logger.log_error('trade_execution', e)
 
     def stop(self):
         self.active = False
-        self.logger.logger.info("Arrêt du bot")
+        self.logger.logger.info("Arrêt du bot...")
 
 class PerformanceMonitor:
     def __init__(self):
