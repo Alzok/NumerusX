@@ -1,0 +1,77 @@
+1️⃣ Refactorisation et centralisation des appels API (market_data.py)
+📌 Problème actuel :
+
+dex_api.py et analytics_engine.py ont des appels API dupliqués.
+Pas de normalisation des formats entre Jupiter et DexScreener.
+📌 Solution :
+
+Créer market_data.py pour regrouper toutes les requêtes de marché.
+Utiliser un cache (TTLCache) pour éviter les appels répétés.
+Ajout d’un fallback entre Jupiter et DexScreener en cas d’échec.
+📂 Fichier concerné : market_data.py (déjà corrigé)
+
+2️⃣ Optimisation de trading_engine.py pour la sécurité et les performances
+📌 Problème actuel :
+
+Manque de vérification des frais de transaction avant swap.
+Absence de contrôle sur la sélection des devis (Jupiter/Raydium).
+La gestion du wallet peut provoquer des erreurs si les clés sont incorrectes.
+📌 Solution :
+
+Ajouter une vérification des frais (get_fee_for_message).
+Améliorer _select_best_quote pour éviter les trades défavorables.
+Sécuriser l'accès aux clés privées avec une validation stricte.
+📂 Fichier concerné : trading_engine.py (à modifier avec ces corrections !)
+
+3️⃣ Sécurisation des transactions et validation des entrées (security.py)
+📌 Problème actuel :
+
+Les adresses Solana ne sont pas validées avant les appels API.
+Aucune protection contre les erreurs Rate Limit sur l’API Jupiter.
+Pas de vérification stricte des jetons (rug pull, volume suspect).
+📌 Solution :
+
+Ajouter une validation des adresses avec Regex.
+Utiliser tenacity pour gérer les erreurs 429 (trop de requêtes).
+Améliorer _detect_rug_pattern avec une analyse plus précise.
+📂 Fichier concerné : security.py (à modifier avec ces corrections !)
+
+4️⃣ Refactorisation de dex_bot.py pour une meilleure organisation
+📌 Problème actuel :
+
+DexBot gère à la fois le portefeuille et l’exécution des ordres → mauvaise séparation des responsabilités.
+Absence de RiskManager pour mieux contrôler les expositions.
+Pas de gestion des erreurs avancée en cas d’échec de trade.
+📌 Solution :
+
+Créer TradeExecutor pour gérer les exécutions.
+Créer RiskManager pour surveiller l’exposition et éviter le sur-trading.
+Ajouter une meilleure gestion des erreurs et logs.
+📂 Fichier concerné : dex_bot.py (à modifier avec ces corrections !)
+
+5️⃣ Amélioration de l’interface utilisateur (gui.py)
+📌 Problème actuel :
+
+Rafraîchissement basé sur des logs → mauvaise réactivité.
+Manque d’affichage des frais et de l’état des transactions.
+📌 Solution :
+
+Utiliser WebSockets ou asyncio pour un affichage en temps réel.
+Ajouter une section "Frais estimés" avant l’exécution d’un trade.
+Afficher les logs de transaction dans l’interface.
+📂 Fichier concerné : gui.py (à modifier avec ces corrections !)
+
+📌 Résumé des corrections à appliquer :
+📂 Fichier	🔧 Modifications à apporter
+market_data.py	✅ Déjà corrigé, regroupe les appels API
+trading_engine.py	🔹 Vérification des frais avant swap
+🔹 Sélection plus intelligente du devis optimal
+🔹 Sécurisation de l'accès aux clés privées
+security.py	🔹 Validation stricte des adresses Solana
+🔹 Protection contre les erreurs Rate Limit
+🔹 Analyse plus poussée des tokens suspects
+dex_bot.py	🔹 Séparation des responsabilités (TradeExecutor & RiskManager)
+🔹 Amélioration des logs et gestion des erreurs
+gui.py	🔹 Rafraîchissement en temps réel avec asyncio
+🔹 Ajout d'une section "Frais estimés"
+🔹 Affichage des transactions en direct
