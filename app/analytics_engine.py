@@ -9,21 +9,28 @@ class AdvancedTradingStrategy:
     def __init__(self):
         self.logger = logging.getLogger('Analytics')
         
-    def analyze(self, df: pd.DataFrame) -> Dict:
-        """Analyse multi-critères avec gestion des erreurs"""
+    def analyze(self, data: Dict) -> Dict:
+        """Analyse multi-source (Jupiter + DexScreener)"""
         try:
+            df = self._prepare_dataframe(data)
             if df.empty or len(df) < 24:
                 return {'error': 'Données insuffisantes'}
                 
             return {
                 'momentum': self._momentum_score(df),
-                'volume_quality': self._volume_analysis(df),
+                'volume_quality': self._volume_analysis(data),
                 'market_structure': self._market_structure(df),
                 'risk': self._risk_score(df)
             }
-        except KeyError as e:
-            self.logger.error(f"Colonne manquante: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Erreur analyse: {str(e)}")
             return {'error': str(e)}
+
+    def _prepare_dataframe(self, data: Dict) -> pd.DataFrame:
+        """Convertit les formats Jupiter/DexScreener en DataFrame"""
+        if 'priceHistory' in data:  # Format Jupiter
+            return pd.DataFrame(data['priceHistory'])
+        return pd.DataFrame(data.get('pairs', [{}])[0].get('priceHistory', []))
 
     def _momentum_score(self, df: pd.DataFrame) -> float:
         close = df['close'].astype(float)
@@ -32,12 +39,12 @@ class AdvancedTradingStrategy:
         stoch = talib.STOCH(df['high'], df['low'], close)[0].iloc[-1]
         return np.mean([rsi * 0.4, macd * 0.3, stoch * 0.3])
 
-    def _volume_analysis(self, df: pd.DataFrame) -> int:
-        volume = df['volume'].astype(float)
-        mean = volume.rolling(24).mean().iloc[-1]
-        std = volume.rolling(24).std().iloc[-1]
-        z_score = abs((volume.iloc[-1] - mean) / std) if std > 0 else 0
-        return 0 if z_score > Config.VOLUME_ZSCORE_LIMIT else 1
+    def _volume_analysis(self, data: Dict) -> int:
+        """Combine Jupiter volume24h et DexScreener volume.h24"""
+        jup_volume = data.get('volume24h', 0)
+        dex_volume = data.get('volume', {}).get('h24', 0)
+        total = jup_volume + dex_volume
+        return 1 if total > Config.MIN_LIQUIDITY else 0
 
     def _market_structure(self, df: pd.DataFrame) -> float:
         resistance = df['high'].rolling(24).max().iloc[-1]

@@ -5,6 +5,7 @@ from .analytics_engine import AdvancedTradingStrategy
 from .logger import DexLogger
 from .database import EnhancedDatabase
 import time
+from typing import List, Dict
 from config import Config
 
 class PortfolioManager:
@@ -12,37 +13,28 @@ class PortfolioManager:
         self.db = EnhancedDatabase()
         self.current_balance = Config.INITIAL_BALANCE
 
-    def get_available_funds(self):
-        """Calcule les fonds disponibles en temps réel"""
-        committed = sum(t['amount'] for t in self.db.get_active_trades())
-        return max(0, self.current_balance - committed)
+    def get_available_funds(self) -> float:
+        return max(0, self.current_balance - sum(t['amount'] for t in self.db.get_active_trades()))
 
-    def update_exposure(self, pair, amount):
-        """Met à jour l'exposition au risque"""
+    def update_exposure(self, pair: Dict, amount: float, protocol: str):
         self.db.record_trade({
             'pair': pair['address'],
             'amount': amount,
-            'timestamp': time.time()
+            'entry_price': pair.get('priceUsd', pair.get('price', 0.0)),
+            'protocol': protocol
         })
         self.current_balance -= amount
 
 class RiskEngine:
     def __init__(self):
-        self.db = EnhancedDatabase()
+        self.max_exposure = 20  # %
+        self.auto_stop_loss = True
 
-    def check_liquidity(self, pair):
-        """Vérifie la liquidité selon plusieurs critères"""
-        liquidity = pair.get('liquidity', {}).get('usd', 0)
-        if liquidity < Config.MIN_LIQUIDITY:
-            return False
-            
-        history = self.db.get_token_history(pair['baseToken']['address'])
-        if history.get('liquidity_change_24h', 0) < -0.3:
-            return False
-            
-        return True
+    def check_liquidity(self, pair: Dict) -> bool:
+        liquidity = pair.get('liquidity', {}).get('usd') or pair.get('liquidity')
+        return liquidity > Config.MIN_LIQUIDITY
 
-class DexBotPro:
+class DexBot:
     def __init__(self):
         self.dex_api = DexAPI()
         self.trader = SolanaTradingEnginePro()
@@ -51,59 +43,73 @@ class DexBotPro:
         self.logger = DexLogger()
         self.portfolio = PortfolioManager()
         self.risk_engine = RiskEngine()
-        self.active = True
+        self.active = False
 
     def run(self):
-        """Boucle principale de trading"""
-        self.logger.logger.info("Démarrage du bot en mode PRO")
+        self.active = True
+        self.logger.logger.info("Démarrage du bot...")
         while self.active:
             try:
-                pairs = self.dex_api.get_solana_pairs()
-                valid_pairs = self._filter_pairs(pairs)
-                signals = self._analyze_pairs(valid_pairs)
-                self._execute_signals(signals)
+                self._run_cycle()
                 time.sleep(Config.UPDATE_INTERVAL)
             except KeyboardInterrupt:
                 self.stop()
-            except Exception as e:
-                self.logger.log_error('main_loop', e)
 
-    def _filter_pairs(self, pairs):
-        return [p for p in pairs if self._deep_security_check(p)]
+    def _run_cycle(self):
+        pairs = self.dex_api.get_solana_pairs()
+        valid_pairs = [p for p in pairs if self._security_check(p)]
+        signals = self._analyze_pairs(valid_pairs)
+        self._execute_signals(signals)
 
-    def _deep_security_check(self, pair):
-        checks = [
-            self.security.verify_token(pair['baseToken']['address'])[0],
+    def _security_check(self, pair: Dict) -> bool:
+        base_token = pair.get('baseToken', {}).get('address') or pair.get('mint')
+        return all([
+            self.security.verify_token(base_token)[0],
             self.risk_engine.check_liquidity(pair),
-            not self.portfolio.db.is_blacklisted(pair['baseToken']['address'])
-        ]
-        return all(checks)
+            not self.portfolio.db.is_blacklisted(pair['address'])
+        ])
 
-    def _analyze_pairs(self, pairs):
-        scored = []
+    def _analyze_pairs(self, pairs: List[Dict]) -> List[tuple]:
+        analyzed = []
         for p in pairs:
             data = self.dex_api.get_historical_data(p['address'])
-            score = self.strategy.calculate_score(data)
-            if score >= Config.TRADE_THRESHOLD:
-                scored.append((p, score))
-        return sorted(scored, key=lambda x: x[1], reverse=True)
+            analysis = self.strategy.analyze(data)
+            if self.strategy.generate_signal(analysis) == 'buy':
+                analyzed.append((p, analysis['momentum']))
+        return sorted(analyzed, key=lambda x: x[1], reverse=True)
 
-    def _execute_signals(self, signals):
-        budget = self.portfolio.get_available_funds()
-        for signal in signals[:Config.MAX_POSITIONS]:
+    def _execute_signals(self, signals: List[tuple]):
+        for pair, score in signals[:Config.MAX_POSITIONS]:
             try:
-                amount = min(budget * 0.1, Config.MAX_ORDER_SIZE)
+                amount = min(self.portfolio.get_available_funds() * 0.1, Config.MAX_ORDER_SIZE)
+                
+                # Détection du protocole
+                protocol = 'jupiter' if 'route' in pair else 'raydium'
                 self.trader.execute_swap(
                     Config.BASE_ASSET,
-                    signal[0]['baseToken']['address'],
+                    pair.get('baseToken', {}).get('address') or pair['mint'],
                     amount
                 )
-                self.portfolio.update_exposure(signal[0], amount)
-                self.logger.log_trade('buy', signal[0])
-                budget -= amount
+                self.portfolio.update_exposure(pair, amount, protocol)
+                
             except Exception as e:
-                self.logger.log_error('execution', e)
+                self.logger.log_error('trade_execution', e)
 
     def stop(self):
         self.active = False
-        self.logger.logger.info("Arrêt propre du bot")
+        self.logger.logger.info("Arrêt du bot...")
+
+class PerformanceMonitor:
+    def __init__(self):
+        self.history = []
+    
+    def track(self, metric: str, value: float):
+        self.history.append({
+            'timestamp': time.time(),
+            'metric': metric,
+            'value': value
+        })
+    
+    @property
+    def daily_pnl(self) -> float:
+        return sum(t['value'] for t in self.history if t['metric'] == 'trade') / Config.INITIAL_BALANCE * 100
