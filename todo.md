@@ -1,5 +1,236 @@
 
 todo ai : 
+debug : 
+
+NumerusX Trading Bot Refactoring Instructions
+Introduction
+I'm working on refactoring the NumerusX Solana trading bot to resolve several architectural inconsistencies, integration issues, and potential bugs. I've already started addressing the overlapping market data components and execution module duplication. Please help me implement the remaining fixes across the codebase.
+Codebase Overview
+NumerusX is a Python-based algorithmic trading platform for the Solana blockchain with these components:
+
+Strategy generation and evaluation (strategy_framework.py, strategy_evaluator.py)
+Risk management (risk_manager.py)
+Market data fetching (market_data.py)
+Trading execution (trading_engine.py)
+Security validation (security.py)
+User interface (gui.py)
+Database management (database.py)
+
+Tasks to Complete
+1. Standardize Import Structure
+
+Convert all relative imports (e.g., from .dex_api import DexAPI) to absolute imports (e.g., from app.dex_api import DexAPI)
+Ensure consistent import patterns across all modules
+Pay special attention to imports in dex_bot.py which has incorrect module references
+
+2. Fix Configuration Management
+
+Create a comprehensive Config class in config.py with all required parameters
+Add the following missing parameters to config.py:
+
+DB_PATH (string): Path to the SQLite database file
+JUPITER_API_KEY (string): API key for Jupiter DEX
+JUPITER_SWAP_URL (string): Endpoint for Jupiter swap API
+JUPITER_PRICE_URL (string): Endpoint for Jupiter price API
+SLIPPAGE (float): Default slippage tolerance (0.01 = 1%)
+BASE_ASSET (string): Default base asset address (e.g., USDC)
+MAX_POSITIONS (int): Maximum number of positions allowed
+MAX_ORDER_SIZE (float): Maximum order size in USD
+UPDATE_INTERVAL (int): Interval for bot update cycle in seconds
+INITIAL_BALANCE (float): Initial portfolio balance
+UI_UPDATE_INTERVAL (int): Interval for UI updates in seconds
+
+
+Update all references to these parameters throughout the codebase
+
+3. Improve API Response Handling
+
+Refactor the _prepare_dataframe method in analytics_engine.py to use a more flexible approach:
+
+pythonCopydef _prepare_dataframe(self, data: Dict) -> pd.DataFrame:
+    """Convertit les formats API en DataFrame de manière robuste."""
+    # Jupiter API format
+    if isinstance(data, dict) and 'priceHistory' in data:
+        return pd.DataFrame(data['priceHistory'])
+    # DexScreener API format
+    elif isinstance(data, dict) and 'pairs' in data and len(data.get('pairs', [])) > 0:
+        pairs_data = data.get('pairs', [{}])[0]
+        if 'priceHistory' in pairs_data:
+            return pd.DataFrame(pairs_data['priceHistory'])
+    # Generic format handling
+    elif isinstance(data, list):
+        return pd.DataFrame(data)
+    # Fallback empty DataFrame with expected columns
+    return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+
+Implement consistent error handling for all API calls with structured responses
+
+4. Address Security Issues
+
+Remove developer key generation from the Dockerfile by creating a separate development configuration
+Ensure security.py's verify_token method consistently returns a tuple of (bool, str) where the boolean indicates if the token is valid and the string provides a reason if invalid
+Implement proper encryption for sensitive data storage
+
+5. Complete Method Implementations
+
+Implement all placeholder methods in trading_engine.py:
+
+_get_swap_routes: Fetching available swap routes from Jupiter API
+_build_swap_transaction: Building a swap transaction based on selected route
+_execute_transaction: Executing a signed transaction
+_execute_fallback_swap: Implementing fallback swap mechanism when primary fails
+
+
+
+6. Fix Database Issues
+
+Add proper database initialization before running migrations in database.py:
+
+pythonCopydef _init_db(self):
+    """Initialize the database and run migrations safely."""
+    os.makedirs(os.path.dirname(Config.DB_PATH), exist_ok=True)
+    
+    with self.conn:
+        # Check if tables exist first
+        cursor = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='trades'")
+        table_exists = cursor.fetchone() is not None
+        
+        if table_exists:
+            # Migration for existing table
+            cursor = self.conn.execute("PRAGMA table_info(trades)")
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            if 'protocol' not in columns:
+                self.conn.execute('''
+                    ALTER TABLE trades 
+                    ADD COLUMN protocol TEXT DEFAULT 'unknown'
+                ''')
+        else:
+            # Create tables for new database
+            self.conn.executescript('''
+                CREATE TABLE IF NOT EXISTS blacklist (
+                    address TEXT PRIMARY KEY,
+                    reason TEXT,
+                    metadata TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    pair_address TEXT,
+                    amount REAL,
+                    entry_price REAL,
+                    protocol TEXT DEFAULT 'unknown',
+                    status TEXT DEFAULT 'open',
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_trades_protocol ON trades(protocol);
+            ''')
+7. Integrate New Components
+
+Update dex_bot.py to use the prediction_engine for signal enhancement:
+
+pythonCopy# In _analyze_pairs method of dex_bot.py
+async def _analyze_pairs(self, pairs: List[Dict]) -> List[tuple]:
+    analyzed = []
+    for p in pairs:
+        # Basic analysis with the strategy
+        data = self.dex_api.get_historical_data(p['address'])
+        analysis = self.strategy.analyze(data)
+        
+        # Enhance with prediction if available
+        if hasattr(self, 'prediction_engine') and self.prediction_engine:
+            try:
+                prediction = await self.prediction_engine.predict_price(p['address'], timeframe="1h")
+                # Combine strategy signal with prediction
+                if prediction.confidence > 0.6:
+                    if prediction.direction == "up" and analysis['momentum'] > 0.4:
+                        # Boost confidence for aligned signals
+                        analysis['momentum'] = max(analysis['momentum'], 0.7)
+                    elif prediction.direction == "down" and analysis['momentum'] < 0.6:
+                        # Reduce momentum for contrary predictions
+                        analysis['momentum'] = min(analysis['momentum'], 0.4)
+            except Exception as e:
+                self.logger.error(f"Prediction error for {p['address']}: {str(e)}")
+        
+        if self.strategy.generate_signal(analysis) == 'buy':
+            analyzed.append((p, analysis['momentum']))
+            
+    return sorted(analyzed, key=lambda x: x[1], reverse=True)
+
+Integrate the risk_manager for position sizing and risk controls
+
+8. Fix dex_api.py Methods
+
+Implement the missing get_price method in dex_api.py:
+
+pythonCopydef get_price(self, pair_address: str) -> float:
+    """
+    Gets the current price for a trading pair.
+    
+    Args:
+        pair_address: Address of the trading pair
+        
+    Returns:
+        Current price as a float, or 0.0 if unavailable
+    """
+    try:
+        # Try to get cached price first
+        cache_key = f"price_{pair_address}"
+        if cache_key in self.cache:
+            return self.cache[cache_key]
+            
+        # Fetch from Jupiter first
+        try:
+            pair_data = self.get_historical_data(pair_address)
+            if pair_data and 'priceUsd' in pair_data:
+                price = float(pair_data['priceUsd'])
+                self.cache[cache_key] = price
+                return price
+        except Exception as e:
+            self.logger.warning(f"Error getting Jupiter price for {pair_address}: {str(e)}")
+            
+        # Fallback to DexScreener
+        try:
+            dex_data = requests.get(f"https://api.dexscreener.com/latest/dex/pairs/solana/{pair_address}", 
+                                  timeout=5).json()
+            if dex_data and 'pairs' in dex_data and len(dex_data['pairs']) > 0:
+                price = float(dex_data['pairs'][0]['priceUsd'])
+                self.cache[cache_key] = price
+                return price
+        except Exception as e:
+            self.logger.warning(f"Error getting DexScreener price for {pair_address}: {str(e)}")
+            
+        return 0.0
+    except Exception as e:
+        self.logger.error(f"Error in get_price for {pair_address}: {str(e)}")
+        return 0.0
+9. Update Requirements.txt
+
+Add necessary dependencies for the prediction engine:
+
+scikit-learn==1.0.2
+torch==1.13.1
+joblib==1.1.0
+
+
+
+Implementation Instructions
+When implementing these changes:
+
+Start with the configuration issues first, as they impact many components
+Then fix the import structure to ensure proper module resolution
+Focus on implementing missing methods before moving to integration tasks
+Test each component individually before moving to the next change
+Pay special attention to error handling to ensure the bot can recover from failures
+
+Please maintain the existing code style and documentation patterns while making these changes. 
+
+-----------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------
+
+feature : 
 Help me improve the NumerusX Solana trading bot with these specific refactoring tasks:
 
 ### Project Context

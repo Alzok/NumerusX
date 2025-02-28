@@ -27,10 +27,20 @@ class AdvancedTradingStrategy:
             return {'error': str(e)}
 
     def _prepare_dataframe(self, data: Dict) -> pd.DataFrame:
-        """Convertit les formats Jupiter/DexScreener en DataFrame"""
-        if 'priceHistory' in data:  # Format Jupiter
+        """Convertit les formats API en DataFrame de manière robuste."""
+        # Jupiter API format
+        if isinstance(data, dict) and 'priceHistory' in data:
             return pd.DataFrame(data['priceHistory'])
-        return pd.DataFrame(data.get('pairs', [{}])[0].get('priceHistory', []))
+        # DexScreener API format
+        elif isinstance(data, dict) and 'pairs' in data and len(data.get('pairs', [])) > 0:
+            pairs_data = data.get('pairs', [{}])[0]
+            if 'priceHistory' in pairs_data:
+                return pd.DataFrame(pairs_data['priceHistory'])
+        # Generic format handling
+        elif isinstance(data, list):
+            return pd.DataFrame(data)
+        # Fallback empty DataFrame with expected columns
+        return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
     def _momentum_score(self, df: pd.DataFrame) -> float:
         close = df['close'].astype(float)

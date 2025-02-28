@@ -1,12 +1,12 @@
-from .dex_api import DexAPI
-from .trading_engine import SolanaTradingEnginePro
-from .security import EnhancedSecurity
-from .analytics_engine import AdvancedTradingStrategy
-from .logger import DexLogger
-from .database import EnhancedDatabase
+from app.dex_api import DexAPI
+from app.trading_engine import SolanaTradingEnginePro
+from security.security import EnhancedSecurity
+from app.analytics_engine import AdvancedTradingStrategy
+from app.logger import DexLogger
+from app.database import EnhancedDatabase
 import time
 from typing import List, Dict
-from config import Config
+from app.config import Config
 
 class PortfolioManager:
     def __init__(self):
@@ -44,6 +44,7 @@ class DexBot:
         self.portfolio = PortfolioManager()
         self.risk_engine = RiskEngine()
         self.active = False
+        self.prediction_engine = None  # Initialized later if available
 
     def run(self):
         self.active = True
@@ -63,34 +64,66 @@ class DexBot:
 
     def _security_check(self, pair: Dict) -> bool:
         base_token = pair.get('baseToken', {}).get('address') or pair.get('mint')
+        is_safe, reason = self.security.verify_token(base_token)
         return all([
-            self.security.verify_token(base_token)[0],
+            is_safe,
             self.risk_engine.check_liquidity(pair),
             not self.portfolio.db.is_blacklisted(pair['address'])
         ])
 
-    def _analyze_pairs(self, pairs: List[Dict]) -> List[tuple]:
+    async def _analyze_pairs(self, pairs: List[Dict]) -> List[tuple]:
         analyzed = []
         for p in pairs:
+            # Basic analysis with the strategy
             data = self.dex_api.get_historical_data(p['address'])
             analysis = self.strategy.analyze(data)
+            
+            # Enhance with prediction if available
+            if self.prediction_engine:
+                try:
+                    prediction = await self.prediction_engine.predict_price(p['address'], timeframe="1h")
+                    # Combine strategy signal with prediction
+                    if prediction.confidence > 0.6:
+                        if prediction.direction == "up" and analysis['momentum'] > 0.4:
+                            # Boost confidence for aligned signals
+                            analysis['momentum'] = max(analysis['momentum'], 0.7)
+                        elif prediction.direction == "down" and analysis['momentum'] < 0.6:
+                            # Reduce momentum for contrary predictions
+                            analysis['momentum'] = min(analysis['momentum'], 0.4)
+                except Exception as e:
+                    self.logger.logger.error(f"Prediction error for {p['address']}: {str(e)}")
+            
             if self.strategy.generate_signal(analysis) == 'buy':
                 analyzed.append((p, analysis['momentum']))
+                
         return sorted(analyzed, key=lambda x: x[1], reverse=True)
 
-    def _execute_signals(self, signals: List[tuple]):
+    async def _execute_signals(self, signals: List[tuple]):
         for pair, score in signals[:Config.MAX_POSITIONS]:
             try:
-                amount = min(self.portfolio.get_available_funds() * 0.1, Config.MAX_ORDER_SIZE)
+                # Use risk manager to calculate optimal position size if available
+                if hasattr(self, 'risk_manager') and self.risk_manager:
+                    max_amount = self.risk_manager.calculate_position_size(
+                        token_address=pair.get('address'),
+                        token_symbol=pair.get('symbol', 'UNKNOWN'),
+                        entry_price=pair.get('priceUsd', 0.0)
+                    )
+                    amount = min(max_amount, Config.MAX_ORDER_SIZE)
+                else:
+                    amount = min(self.portfolio.get_available_funds() * 0.1, Config.MAX_ORDER_SIZE)
                 
-                # Détection du protocole
+                # Detect protocol
                 protocol = 'jupiter' if 'route' in pair else 'raydium'
-                self.trader.execute_swap(
+                result = await self.trader.execute_swap(
                     Config.BASE_ASSET,
-                    pair.get('baseToken', {}).get('address') or pair['mint'],
+                    pair.get('baseToken', {}).get('address') or pair.get('mint'),
                     amount
                 )
-                self.portfolio.update_exposure(pair, amount, protocol)
+                
+                if result.get('success', False):
+                    self.portfolio.update_exposure(pair, amount, protocol)
+                else:
+                    self.logger.log_error('trade_execution', Exception(result.get('error', 'Unknown error')))
                 
             except Exception as e:
                 self.logger.log_error('trade_execution', e)

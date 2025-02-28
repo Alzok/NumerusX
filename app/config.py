@@ -1,5 +1,9 @@
 # config.py
 import os
+from dotenv import load_dotenv
+
+# Charger les variables d'environnement depuis .env
+load_dotenv()
 
 # Configuration de la persistance de Chroma
 CHROMA_DB_DIR = "./db"
@@ -36,6 +40,62 @@ COSTS = {
          "deepseek-reasoner (r1)": 0.00001
     }
 }
+
+class Config:
+    # Configuration de l'application
+    APP_NAME = "NumerusX"
+    DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+    
+    # Configuration de sécurité
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "default_secret_key_change_in_production")
+    JWT_EXPIRATION = int(os.getenv("JWT_EXPIRATION", "3600"))  # En secondes (1 heure par défaut)
+    
+    # Configuration de base de données
+    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///numerusx.db")
+    
+    # Configuration Solana
+    SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    SOLANA_NETWORK = os.getenv("SOLANA_NETWORK", "mainnet-beta")
+    
+    # Configuration Jupiter
+    JUPITER_SWAP_URL = os.getenv("JUPITER_SWAP_URL", "https://quote-api.jup.ag/v4/quote")
+    JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", None)
+    
+    # Paramètres trading
+    SLIPPAGE = float(os.getenv("SLIPPAGE", "0.5"))  # 0.5%
+    MIN_LIQUIDITY = float(os.getenv("MIN_LIQUIDITY", "10000"))  # Volume minimum en $
+    
+    # Chemins
+    LOG_DIR = os.getenv("LOG_DIR", "logs")
+    
+    # Configuration base de données
+    DB_PATH = "data/numerusx.db"
+    
+    # Configuration API
+    JUPITER_API_KEY = ""  # À définir via variable d'environnement en production
+    JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/quote"
+    JUPITER_PRICE_URL = "https://price.jup.ag/v4/price"
+    
+    # Paramètres de trading
+    SLIPPAGE = 0.01  # 1% de slippage par défaut
+    BASE_ASSET = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC sur Solana
+    MAX_POSITIONS = 5
+    MAX_ORDER_SIZE = 1000.0  # Taille maximale des ordres en USD
+    UPDATE_INTERVAL = 60  # Intervalle de mise à jour en secondes
+    INITIAL_BALANCE = 1000.0  # Solde initial du portefeuille en USD
+    
+    # Configuration UI
+    UI_UPDATE_INTERVAL = 2  # Intervalle de mise à jour de l'UI en secondes
+    
+    # Mode développement (doit être False en production)
+    DEV_MODE = False
+    
+    @classmethod
+    def get_db_path(cls):
+        """Renvoie le chemin complet de la base de données, en créant le répertoire si nécessaire"""
+        import os
+        os.makedirs(os.path.dirname(cls.DB_PATH), exist_ok=True)
+        return cls.DB_PATH
 
 def update_configuration(mode, model, language, api_option, remote_api, key_deepseek, key_openai, remote_token_limit, api_variant):
     """

@@ -10,13 +10,11 @@ RUN apt-get update && apt-get install -y \
     libta-lib-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Génération clés de dev (à retirer en production)
+# Copy development env file if in dev mode
 ARG ENVIRONMENT=dev
+COPY docker/dev.env /app/config/.env.example
 RUN if [ "$ENVIRONMENT" = "dev" ]; then \
-    apt-get update && apt-get install -y python3-cryptography && \
-    pip install cryptography==41.0.7 && \
-    python3 -c "from cryptography.fernet import Fernet; \
-    print(f'ENCRYPTION_KEY={Fernet.generate_key().decode()}\nENCRYPTED_SOLANA_PK=dev_key')" > /app/config/.env; \
+    cp /app/config/.env.example /app/config/.env; \
 fi
 
 COPY requirements.txt .

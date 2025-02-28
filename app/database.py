@@ -1,6 +1,7 @@
 import sqlite3
 import json
-from config import Config
+import os
+from app.config import Config
 import logging
 from typing import List, Dict
 
@@ -11,17 +12,28 @@ class EnhancedDatabase:
         self._init_db()
 
     def _init_db(self):
+        # Ensure the database directory exists
+        db_dir = os.path.dirname(Config.DB_PATH)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+        
         with self.conn:
-            # Migration sécurisée pour ajouter 'protocol'
-            cursor = self.conn.execute("PRAGMA table_info(trades)")
-            columns = [col[1] for col in cursor.fetchall()]
+            # Check if the trades table exists first
+            cursor = self.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='trades'")
+            table_exists = cursor.fetchone() is not None
             
-            if 'protocol' not in columns:
-                self.conn.execute('''
-                    ALTER TABLE trades 
-                    ADD COLUMN protocol TEXT DEFAULT 'unknown'
-                ''')
-
+            if table_exists:
+                # Migration for existing table
+                cursor = self.conn.execute("PRAGMA table_info(trades)")
+                columns = [col[1] for col in cursor.fetchall()]
+                
+                if 'protocol' not in columns:
+                    self.conn.execute('''
+                        ALTER TABLE trades 
+                        ADD COLUMN protocol TEXT DEFAULT 'unknown'
+                    ''')
+            
+            # Create tables if they don't exist
             self.conn.executescript('''
                 CREATE TABLE IF NOT EXISTS blacklist (
                     address TEXT PRIMARY KEY,
@@ -35,7 +47,7 @@ class EnhancedDatabase:
                     pair_address TEXT,
                     amount REAL,
                     entry_price REAL,
-                    protocol TEXT,
+                    protocol TEXT DEFAULT 'unknown',
                     status TEXT DEFAULT 'open',
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
