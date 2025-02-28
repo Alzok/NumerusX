@@ -52,43 +52,35 @@ class Config:
     
     # Configuration de base de données
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///numerusx.db")
+    DB_PATH = os.getenv("DB_PATH", "data/numerusx.db")
     
     # Configuration Solana
     SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
     SOLANA_NETWORK = os.getenv("SOLANA_NETWORK", "mainnet-beta")
     
     # Configuration Jupiter
-    JUPITER_SWAP_URL = os.getenv("JUPITER_SWAP_URL", "https://quote-api.jup.ag/v4/quote")
-    JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", None)
+    JUPITER_SWAP_URL = os.getenv("JUPITER_SWAP_URL", "https://quote-api.jup.ag/v6/quote")
+    JUPITER_PRICE_URL = os.getenv("JUPITER_PRICE_URL", "https://price.jup.ag/v4/price")
+    JUPITER_API_KEY = os.getenv("JUPITER_API_KEY", "")
     
     # Paramètres trading
-    SLIPPAGE = float(os.getenv("SLIPPAGE", "0.5"))  # 0.5%
+    SLIPPAGE = float(os.getenv("SLIPPAGE", "0.01"))  # 1% de slippage par défaut
+    BASE_ASSET = os.getenv("BASE_ASSET", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")  # USDC sur Solana
     MIN_LIQUIDITY = float(os.getenv("MIN_LIQUIDITY", "10000"))  # Volume minimum en $
+    MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "5"))  # Nombre maximum de positions ouvertes
+    MAX_ORDER_SIZE = float(os.getenv("MAX_ORDER_SIZE", "1000.0"))  # Taille maximale des ordres en USD
+    TRADE_THRESHOLD = float(os.getenv("TRADE_THRESHOLD", "0.65"))  # Seuil de confiance pour les trades
+    UPDATE_INTERVAL = int(os.getenv("UPDATE_INTERVAL", "60"))  # Intervalle de mise à jour en secondes
+    INITIAL_BALANCE = float(os.getenv("INITIAL_BALANCE", "1000.0"))  # Solde initial du portefeuille en USD
+    
+    # Configuration UI
+    UI_UPDATE_INTERVAL = int(os.getenv("UI_UPDATE_INTERVAL", "2"))  # Intervalle de mise à jour de l'UI en secondes
     
     # Chemins
     LOG_DIR = os.getenv("LOG_DIR", "logs")
     
-    # Configuration base de données
-    DB_PATH = "data/numerusx.db"
-    
-    # Configuration API
-    JUPITER_API_KEY = ""  # À définir via variable d'environnement en production
-    JUPITER_SWAP_URL = "https://quote-api.jup.ag/v6/quote"
-    JUPITER_PRICE_URL = "https://price.jup.ag/v4/price"
-    
-    # Paramètres de trading
-    SLIPPAGE = 0.01  # 1% de slippage par défaut
-    BASE_ASSET = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC sur Solana
-    MAX_POSITIONS = 5
-    MAX_ORDER_SIZE = 1000.0  # Taille maximale des ordres en USD
-    UPDATE_INTERVAL = 60  # Intervalle de mise à jour en secondes
-    INITIAL_BALANCE = 1000.0  # Solde initial du portefeuille en USD
-    
-    # Configuration UI
-    UI_UPDATE_INTERVAL = 2  # Intervalle de mise à jour de l'UI en secondes
-    
     # Mode développement (doit être False en production)
-    DEV_MODE = False
+    DEV_MODE = os.getenv("DEV_MODE", "False").lower() == "true"
     
     @classmethod
     def get_db_path(cls):
