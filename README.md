@@ -33,6 +33,107 @@ NumerusX is like a team of specialized robots working together:
 7.  **The Record Keeper (`Database`)**: All trades, decisions, and important events are logged for review and analysis.
 8.  **The Control Panel (`Dashboard` - in progress)**: This will be your window into NumerusX, allowing you to monitor everything, make adjustments, and see your results.
 
+## Visualizing NumerusX: Architecture and Flow
+
+To better understand how NumerusX operates, here are a couple of diagrams:
+
+### High-Level Architecture
+
+```mermaid
+graph TD
+    A[User/Developer] --> B(app/main.py);
+    B --> C{NumerusX Core Orchestrator};
+    C --> D(app/dashboard.py - NiceGUI);
+    C --> E(app/dex_bot.py);
+    E --> F(app/config.py);
+    E --> G(app/market/market_data.py);
+    G --> H{External APIs: Jupiter, DexScreener};
+    E --> I(app/analytics_engine.py);
+    E --> J(app/prediction_engine.py);
+    J --> K(AI/ML Models);
+    E --> L(app/strategy_framework.py);
+    L --> M(User-Defined Strategies);
+    E --> N(app/security/security.py);
+    E --> O(app/risk_manager.py);
+    E --> P(app/trading/trading_engine.py);
+    P --> Q(Solana Blockchain / DEXs);
+    E --> R(app/database.py);
+    R --> S(SQLite Database);
+    D --> C;
+    A --> M;
+
+    subgraph "User Interface"
+        D
+    end
+
+    subgraph "Core Logic"
+        C
+        E
+    end
+
+    subgraph "Data & Intelligence"
+        G
+        I
+        J
+        K
+        N
+    end
+
+    subgraph "Strategy & Risk"
+        L
+        M
+        O
+    end
+
+    subgraph "Execution & Persistence"
+        P
+        R
+        S
+    end
+
+    subgraph "External Services"
+        H
+        Q
+    end
+```
+
+### Typical Trading Signal Workflow
+
+```mermaid
+sequenceDiagram
+    participant MD as Market Data Provider
+    participant AE as Analytics Engine
+    participant PE as Prediction Engine
+    participant SF as Strategy Framework
+    participant Sec as Security Analyzer
+    participant RM as Risk Manager
+    participant TE as Trading Engine
+    participant DB as DexBot (Orchestrator)
+
+    DB->>MD: Request Market Data (Token X)
+    MD-->>DB: Provide Data (Price, Volume, etc.)
+    DB->>AE: Analyze Data for Features
+    AE-->>DB: Provide Technical Indicators
+    DB->>PE: Predict Price/Trend & Sentiment
+    PE-->>DB: Provide Prediction & Confidence
+    DB->>SF: Evaluate Strategy (with data & predictions)
+    SF-->>DB: Generate Trading Signal (e.g., BUY Token X)
+    alt Signal Generated
+        DB->>Sec: Validate Token X Security
+        Sec-->>DB: Security Assessment (OK/Not OK)
+        alt Token Secure
+            DB->>RM: Calculate Position Size & Risk
+            RM-->>DB: Position Size & Risk OK
+            DB->>TE: Execute Trade (BUY Token X)
+            TE-->>DB: Trade Confirmation/Status
+        else Token Not Secure
+            DB->>DB: Log Security Alert, Abort Trade
+        end
+    else No Signal / Conditions Not Met
+         DB->>DB: Log Decision, Continue Monitoring
+    end
+```
+
 ## Project Structure
 
 ```
@@ -147,6 +248,63 @@ Here\'s a more detailed look at the key components:
     *   Initializes and starts the core application components, including the `DexBot` and the `Dashboard`.
 
 This structure is designed to be modular, allowing for independent development and testing of each component, while facilitating complex interactions to achieve intelligent and automated trading.
+
+## Getting Started
+
+While NumerusX is a complex system, here\'s a general idea of how one might get started (details will vary based on the evolving state of the `main.py` and `dashboard.py`):
+
+1.  **Prerequisites**:
+    *   Python 3.9+
+    *   Git
+    *   Docker and Docker Compose (for containerized deployment)
+    *   Access to a Solana RPC node (either a public one or your own).
+
+2.  **Installation**:
+    ```bash
+    git clone https://your-repository-link/NumerusX.git # Replace with actual link
+    cd NumerusX
+    pip install -r requirements.txt
+    ```
+
+3.  **Configuration (`.env` file)**:
+    *   Create a `.env` file in the root directory of the project.
+    *   Populate it with necessary API keys (Jupiter, DexScreener, any sentiment analysis APIs), your Solana wallet private key (handle with extreme care!), RPC URL, and other trading parameters. Refer to `app/config.py` for all possible environment variables and their defaults.
+    *   **Example `.env` structure**:
+        ```env
+        SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+        JUPITER_API_KEY=your_jupiter_api_key_if_any
+        # Wallet (ensure this is stored securely, especially for mainnet)
+        WALLET_PATH=~/.config/solana/id.json 
+        # or SOLANA_PRIVATE_KEY_BS58=your_base58_private_key
+        
+        # Trading Parameters
+        BASE_ASSET_MINT=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v # USDC
+        MAX_POSITIONS=5
+        # ... other parameters as defined in config.py
+        ```
+
+4.  **Running the Bot (Example - Docker)**:
+    *   Ensure Docker is running.
+    *   Build and run the application using Docker Compose:
+        ```bash
+        docker-compose up --build
+        ```
+    *   This will typically start the bot and the NiceGUI dashboard.
+
+5.  **Accessing the Dashboard**:
+    *   Open your web browser and navigate to the address provided by NiceGUI (usually `http://localhost:8080` or similar, check the console output).
+
+6.  **Developing a Strategy**:
+    *   Study `app/strategy_framework.py` and the examples in `app/examples/`.
+    *   Create your own strategy file (e.g., `app/strategies/my_cool_strategy.py`) by inheriting from `Strategy`.
+    *   Implement the `analyze` and `generate_signal` methods.
+    *   Configure the bot (potentially via the dashboard or `config.py`) to use your new strategy.
+
+7.  **Important Considerations**:
+    *   **Security**: NEVER commit your private keys or sensitive API keys directly to your Git repository, especially if it\'s public. Use environment variables and `.gitignore` appropriately.
+    *   **Testnet First**: Always test extensively on a Solana testnet or devnet environment before risking real funds on mainnet.
+    *   **Logging**: Pay close attention to the logs generated by `app/logger.py` to understand the bot\'s behavior and troubleshoot issues.
+    *   **Incremental Development**: If you\'re contributing or extending, focus on one component or feature at a time.
 
 ## The Goal: Intelligent and Secure Crypto Trading
 
