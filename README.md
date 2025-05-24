@@ -2,135 +2,132 @@
 
 # NumerusX: Your Intelligent Navigator for Cryptocurrency Trading
 
-NumerusX is a sophisticated software platform designed to empower users in the complex world of cryptocurrency trading. Think of it as an intelligent assistant that helps you make informed decisions, automate your trading strategies, and manage your digital assets on the Solana blockchain, a fast and efficient network for crypto transactions.
+NumerusX is a sophisticated software platform designed to empower users in the complex world of cryptocurrency trading. Think of it as an **intelligent agent** that helps you make informed decisions, automate your trading strategies, and manage your digital assets on the Solana blockchain, a fast and efficient network for crypto transactions.
 
 ## What Can NumerusX Do For You?
 
 At its core, NumerusX aims to make advanced trading techniques accessible and manageable. Here's how:
 
-*   **Smart Trading Strategies**: NumerusX allows you to define and automate your own trading approaches. Whether you prefer to follow market trends, react to specific price movements, or employ more complex logic, the platform provides the tools to bring your strategies to life.
-*   **AI-Powered Insights**: Going beyond simple automation, NumerusX leverages Artificial Intelligence (AI) to analyze market data, predict potential price movements, and even understand market sentiment by looking at social media trends. This helps in identifying opportunities and risks that might not be obvious at first glance.
-*   **Risk Management First**: The cryptocurrency market can be volatile. NumerusX is built with a strong emphasis on managing risk. It helps you define safety nets, such as setting limits on potential losses, and employs techniques to protect your investments.
-*   **Security Shield**: NumerusX includes features to help identify potentially risky tokens or fraudulent schemes, adding an extra layer of security to your trading activities.
-*   **Market Understanding**: The platform constantly gathers and processes market data from various sources, ensuring that your trading decisions are based on the latest information available. It can analyze liquidity (how easily an asset can be bought or sold) and track significant market events.
-*   **Performance Tracking**: Understand how well your strategies are performing with clear reports and visualizations. This allows you to learn, adapt, and refine your approach over time.
-*   **User-Friendly Dashboard**: (Under development) A clear and intuitive dashboard will provide a central hub to monitor your trading bot, view your portfolio, analyze market trends, and control the bot's operations.
+*   **AI-Driven Decision Making**: NumerusX places a powerful AI Agent at its core. This agent synthesizes a vast array of information – market data, technical analysis, AI predictions, risk parameters, and even social sentiment – to make the final trading decisions.
+*   **Smart Input Strategies**: While the AI Agent makes the ultimate call, NumerusX allows you to define and plug in various "input strategies" or "signal generators." These can range from traditional technical indicator-based logic to more complex analytical modules. The AI Agent intelligently weighs these inputs.
+*   **Comprehensive Market Analysis**: The system leverages multiple AI and analytical modules to understand market dynamics, predict potential price movements, and gauge sentiment. These insights become critical inputs for the central AI Agent.
+*   **Risk Management First**: The cryptocurrency market can be volatile. NumerusX is built with a strong emphasis on managing risk. Risk parameters and portfolio status are key inputs to the AI Agent, ensuring decisions align with predefined safety nets.
+*   **Security Shield**: NumerusX includes features to help identify potentially risky tokens or fraudulent schemes. Security assessments also feed into the AI Agent's decision process.
+*   **Continuous Market Understanding**: The platform constantly gathers and processes market data, ensuring that the AI Agent's decisions are based on the latest information.
+*   **Performance Tracking & Transparency**: Understand how well the AI Agent and its input strategies are performing. The system aims to provide clear logs of the AI Agent's reasoning.
+*   **User-Friendly Dashboard**: (Under development) A clear and intuitive dashboard will provide a central hub to monitor your trading bot, view your portfolio, analyze market trends, observe the AI Agent's decisions, and control its operations.
 
-## How Does It Work? (A Simplified View)
+## How Does It Work? (An AI Agent-Centric View)
 
-NumerusX is like a team of specialized robots working together:
+NumerusX operates with a central AI Agent that synthesizes information from a team of specialized modules:
 
-1.  **The Data Gatherer (`MarketDataProvider`)**: This component is constantly watching the market, collecting price information, news, and other relevant data from various exchanges and sources on the Solana network (like Jupiter and DexScreener).
-2.  **The Analyst (`AnalyticsEngine` & `PredictionEngine`)**: This is where the "smarts" come in. It uses the collected data to:
-    *   Identify market trends and patterns.
-    *   Employ AI and machine learning to predict potential price changes.
-    *   Gauge market sentiment (e.g., is the general feeling about a token positive or negative?).
-    *   Understand the underlying causes of market movements.
-3.  **The Strategist (`StrategyFramework` & individual strategy files)**: You define your trading rules here. Based on the Analyst's insights, the Strategist decides when to suggest a buy or sell action. You can have multiple strategies, and the system can even learn which ones work best under different market conditions.
-4.  **The Risk Manager (`RiskManager`)**: Before any action is taken, this component assesses the potential risks. It decides how much to trade based on your predefined risk tolerance and current market volatility, aiming to protect your capital.
-5.  **The Security Guard (`Security`)**: This module checks tokens for red flags, helping to avoid scams or highly risky assets.
-6.  **The Executor (`TradingEngine`)**: Once a decision is made and deemed safe, this component carries out the actual trades on the Solana network, interacting with Decentralized Exchanges (DEXs). It aims for the best possible execution price and handles the technicalities of the transaction.
-7.  **The Record Keeper (`Database`)**: All trades, decisions, and important events are logged for review and analysis.
-8.  **The Control Panel (`Dashboard` - in progress)**: This will be your window into NumerusX, allowing you to monitor everything, make adjustments, and see your results.
+1.  **The Data Gatherer (`MarketDataProvider`)**: Constantly watches the market, collecting price information, news, and other relevant data (Jupiter, DexScreener).
+2.  **The Signal & Feature Generators (Formerly Analyst & Strategist - `AnalyticsEngine`, `PredictionEngine`, `StrategyFramework`, `app/strategies/*`)**: These modules now act as sophisticated input providers for the AI Agent:
+    *   `AnalyticsEngine`: Performs technical analysis and feature engineering.
+    *   `PredictionEngine`: Employs AI/ML for price predictions, market regime classification, and sentiment analysis.
+    *   `StrategyFramework` & `app/strategies/*`: User-defined or pre-built logic modules that generate specific signals or analytical outputs based on market data and indicators.
+3.  **The Central AI Agent (`AIAgent`)**: This is the brain. It receives and processes all the inputs from the Data Gatherer and the various Signal & Feature Generators. It also considers risk parameters from the Risk Manager and security inputs. Based on its internal logic (which could be a complex ML model, a meta-learner, or a Reinforcement Learning agent), it makes the final, holistic decision on whether to trade, what to trade, and how much.
+4.  **The Risk Manager (`RiskManager`)**: Provides critical risk assessment data (e.g., current exposure, available capital, volatility-based limits) as direct input to the AI Agent, ensuring its decisions adhere to safety protocols.
+5.  **The Security Guard (`Security`)**: Checks tokens for red flags. This security assessment is another input for the AI Agent.
+6.  **The Orchestrator (`DexBot`)**: This component manages the flow of information. It gathers data from all provider modules, feeds it to the AI Agent, receives the final decision from the AI Agent, and then passes this decision to the Executor.
+7.  **The Executor (`TradeExecutor` & `TradingEngine`)**: Once the AI Agent makes a decision (conveyed via `DexBot`), these components carry out the actual trades on the Solana network.
+8.  **The Record Keeper (`Database`)**: All trades, AI Agent decisions (including key inputs and reasoning), and important events are logged.
+9.  **The Control Panel (`Dashboard` - in progress)**: Your window into NumerusX, allowing you to monitor the AI Agent, its inputs, and overall performance.
 
-## Visualizing NumerusX: Architecture and Flow
+## Visualizing NumerusX: Architecture and Flow (AI Agent Centric)
 
-To better understand how NumerusX operates, here are a couple of diagrams:
-
-### High-Level Architecture
+### High-Level Architecture (Centred on AI Agent)
 
 ```mermaid
 graph TD
     A[User/Developer] --> B(app/main.py);
-    B --> C{NumerusX Core Orchestrator};
+    B --> C{NumerusX Core Orchestrator (app/dex_bot.py)};
     C --> D(app/dashboard.py - NiceGUI);
-    C --> E(app/dex_bot.py);
-    E --> F(app/config.py);
-    E --> G(app/market/market_data.py);
-    G --> H{External APIs: Jupiter, DexScreener};
-    E --> I(app/analytics_engine.py);
-    E --> J(app/prediction_engine.py);
-    J --> K(AI/ML Models);
-    E --> L(app/strategy_framework.py);
-    L --> M(User-Defined Strategies);
-    E --> N(app/security/security.py);
-    E --> O(app/risk_manager.py);
-    E --> P(app/trading/trading_engine.py);
-    P --> Q(Solana Blockchain / DEXs);
-    E --> R(app/database.py);
-    R --> S(SQLite Database);
-    D --> C;
-    A --> M;
-
-    subgraph "User Interface"
-        D
+    
+    subgraph "Input & Data Providers"
+        DATASRC(app/market/market_data.py);
+        DATASRC --> EXTAPI{External APIs: Jupiter, DexScreener, Social};
+        TECH_ANALYSIS(app/analytics_engine.py);
+        PREDICT_AI(app/prediction_engine.py);
+        STRAT_FRWK(app/strategy_framework.py);
+        USER_STRATS(app/strategies/*);
+        RISK_INFO(app/risk_manager.py);
+        SEC_INFO(app/security/security.py);
+        PORT_INFO(app/portfolio_manager.py);
     end
 
-    subgraph "Core Logic"
-        C
-        E
-    end
-
-    subgraph "Data & Intelligence"
-        G
-        I
-        J
-        K
-        N
-    end
-
-    subgraph "Strategy & Risk"
-        L
-        M
-        O
+    subgraph "Central Decision Core"
+        AI_AGENT_CORE[<<app/ai_agent.py>>
+AI Agent Décisionnel Central];
     end
 
     subgraph "Execution & Persistence"
-        P
-        R
-        S
+        EXEC_ENG(app/trade_executor.py);
+        TRADE_SYS(app/trading/trading_engine.py);
+        TRADE_SYS --> SOLANA(Solana Blockchain / DEXs);
+        DB_STORE(app/database.py);
+        DB_STORE --> SQLITEDB(SQLite Database);
     end
 
-    subgraph "External Services"
-        H
-        Q
-    end
+    C --> DATASRC;
+    C --> TECH_ANALYSIS;
+    C --> PREDICT_AI;
+    C --> STRAT_FRWK;
+    STRAT_FRWK --> USER_STRATS;
+    C --> RISK_INFO;
+    C --> SEC_INFO;
+    C --> PORT_INFO;
+
+    DATASRC --> AI_AGENT_CORE;
+    TECH_ANALYSIS --> AI_AGENT_CORE;
+    PREDICT_AI --> AI_AGENT_CORE;
+    USER_STRATS --> AI_AGENT_CORE;
+    RISK_INFO --> AI_AGENT_CORE;
+    SEC_INFO --> AI_AGENT_CORE;
+    PORT_INFO --> AI_AGENT_CORE;
+    
+    AI_AGENT_CORE --> C; %% AI Agent returns decision to Orchestrator
+    C --> EXEC_ENG;
+    EXEC_ENG --> TRADE_SYS;
+    EXEC_ENG --> DB_STORE; %% For trade recording
+    AI_AGENT_CORE --> DB_STORE; %% For decision logging
+
+    D --> C;
+    A --> F(app/config.py);
+    C --> F;
 ```
 
-### Typical Trading Signal Workflow
+### Trading Decision Workflow (AI Agent Centric)
 
 ```mermaid
 sequenceDiagram
-    participant MD as Market Data Provider
-    participant AE as Analytics Engine
-    participant PE as Prediction Engine
-    participant SF as Strategy Framework
-    participant Sec as Security Analyzer
-    participant RM as Risk Manager
-    participant TE as Trading Engine
-    participant DB as DexBot (Orchestrator)
+    participant Orchestrator as DexBot (Orchestrator)
+    participant DataProvider as Market Data Provider
+    participant FeatureProviders as Signal/Feature Generators (Analytics, Predictions, Strategies)
+    participant RiskSecPort as Risk/Security/Portfolio Modules
+    participant AIAgent as AI Agent (app/ai_agent.py)
+    participant Executor as Trade Executor
+    participant Blockchain as Solana Network
 
-    DB->>MD: Request Market Data (Token X)
-    MD-->>DB: Provide Data (Price, Volume, etc.)
-    DB->>AE: Analyze Data for Features
-    AE-->>DB: Provide Technical Indicators
-    DB->>PE: Predict Price/Trend & Sentiment
-    PE-->>DB: Provide Prediction & Confidence
-    DB->>SF: Evaluate Strategy (with data & predictions)
-    SF-->>DB: Generate Trading Signal (e.g., BUY Token X)
-    alt Signal Generated
-        DB->>Sec: Validate Token X Security
-        Sec-->>DB: Security Assessment (OK/Not OK)
-        alt Token Secure
-            DB->>RM: Calculate Position Size & Risk
-            RM-->>DB: Position Size & Risk OK
-            DB->>TE: Execute Trade (BUY Token X)
-            TE-->>DB: Trade Confirmation/Status
-        else Token Not Secure
-            DB->>DB: Log Security Alert, Abort Trade
-        end
-    else No Signal / Conditions Not Met
-         DB->>DB: Log Decision, Continue Monitoring
+    Orchestrator->>DataProvider: Request Market Data
+    DataProvider-->>Orchestrator: Market Data
+    Orchestrator->>FeatureProviders: Request Analyses/Signals/Predictions
+    FeatureProviders-->>Orchestrator: Analytical Inputs
+    Orchestrator->>RiskSecPort: Request Constraints/Status
+    RiskSecPort-->>Orchestrator: Risk, Security, Portfolio Info
+
+    Orchestrator->>AIAgent: Provide Aggregated Inputs
+    AIAgent->>AIAgent: Process Inputs & Make Decision
+    AIAgent-->>Orchestrator: Final Trade Order / No Action + Reasoning
+
+    alt Trade Order Issued by AI Agent
+        Orchestrator->>Executor: Execute Order
+        Executor->>Blockchain: Submit Transaction
+        Blockchain-->>Executor: Confirmation/Status
+        Executor-->>Orchestrator: Trade Result
+        Orchestrator->>Orchestrator: Log Trade & AI Reasoning
+    else No Action by AI Agent
+        Orchestrator->>Orchestrator: Log AI Reasoning (No Trade)
     end
 ```
 
@@ -140,28 +137,35 @@ sequenceDiagram
 NumerusX/
 ├── app/
 │   ├── __init__.py
+│   ├── ai_agent.py           # NEW: Central AI Agent for decision making
 │   ├── api_routes.py         # FastAPI routes for external interaction (if any)
-│   ├── analytics_engine.py     # Advanced market analysis and feature engineering
+│   ├── analytics_engine.py     # Advanced market analysis and feature engineering (Input to AI Agent)
 │   ├── config.py             # Centralized configuration management
 │   ├── dashboard.py          # Main NiceGUI dashboard application logic
 │   ├── database.py           # SQLite database interaction and schema
-│   ├── dex_bot.py            # Core bot logic, orchestrates strategies and execution
+│   ├── dex_bot.py            # Core bot logic, orchestrates data to AI Agent and executes its decisions
 │   ├── gui.py                # (Potentially legacy or helper UI components for NiceGUI)
 │   ├── logger.py             # Application-wide logging setup
 │   ├── main.py               # Main entry point for the application
 │   ├── monitoring.py         # System monitoring and performance tracking
-│   ├── prediction_engine.py  # AI/ML models for price/trend prediction & sentiment
-│   ├── risk_manager.py       # Position sizing, portfolio risk controls
+│   ├── portfolio_manager.py  # Manages portfolio state (Input to AI Agent, updated by Executor)
+│   ├── prediction_engine.py  # AI/ML models for price/trend prediction & sentiment (Input to AI Agent)
+│   ├── risk_manager.py       # Position sizing, portfolio risk controls (Input to AI Agent)
 │   ├── strategy_debug.py     # Tools for debugging trading strategies
 │   ├── strategy_evaluator.py # Performance evaluation of trading strategies
-│   ├── strategy_framework.py # Base classes and utilities for creating strategies
+│   ├── strategy_framework.py # Base classes for creating signal/feature modules (Input to AI Agent)
+│   ├── trade_executor.py     # Handles the execution of trades decided by the AI Agent
 │   ├── wallet.py             # Solana wallet management and key handling
 │   ├── examples/             # Example strategies and usage scenarios
 │   │   └── simple_strategy_example.py
 │   ├── market/               # Market data acquisition and management
-│   │   └── market_data.py    # Unified provider for Jupiter, DexScreener, etc.
-│   ├── security/             # Token security analysis and validation
+│   │   └── market_data.py    # Unified provider for Jupiter, DexScreener, etc. (Input to AI Agent)
+│   ├── security/             # Token security analysis and validation (Input to AI Agent)
 │   │   └── security.py
+│   ├── strategies/           # Specific strategy modules (Input to AI Agent)
+│   │   └── momentum_strategy.py
+│   │   └── mean_reversion_strategy.py
+│   │   └── trend_following_strategy.py
 │   └── trading/              # Trading execution logic
 │       └── trading_engine.py # Interface with Solana DEXs (e.g., Jupiter) for swaps
 ├── Docker/
@@ -173,81 +177,53 @@ NumerusX/
 └── requirements.txt        # Python package dependencies
 ```
 
-## Core Components In-Depth
-
-Here\'s a more detailed look at the key components:
+## Core Components In-Depth (Reflecting AI Agent Architecture)
 
 1.  **`app/config.py` (Configuration Manager)**
-    *   Centralizes all application settings, API keys, trading parameters (slippage, max positions, etc.), and paths.
-    *   Loads settings from environment variables (`.env` file) using `python-dotenv`, providing defaults where applicable.
-    *   Ensures consistent access to configuration throughout the application.
+    *   (Largely unchanged) Centralizes all application settings.
 
 2.  **`app/market/market_data.py` (Market Data Provider)**
-    *   Consolidates all external API calls for market data (prices, historical data, token info, liquidity) from sources like Jupiter, DexScreener.
-    *   Implements robust caching (e.g., `TTLCache`) to reduce API call frequency and latency.
-    *   Handles API rate limits gracefully using `tenacity` for retries with exponential backoff.
-    *   Provides fallback mechanisms if one data source fails.
-    *   Standardizes data formats received from different APIs into a consistent internal representation.
+    *   (Largely unchanged) Consolidates external API calls for market data. This data is a primary *input to the AI Agent* via the `DexBot` orchestrator.
 
-3.  **`app/analytics_engine.py` (Market Analytics Engine)**
-    *   Performs advanced analysis on raw market data to generate features for strategies and prediction models.
-    *   Calculates various technical indicators (RSI, MACD, Bollinger Bands, ATR, etc.).
-    *   May include on-chain analysis capabilities (e.g., tracking whale movements, if APIs permit).
-    *   Capable of multi-timeframe analysis to identify correlations and divergences.
-    *   Can identify support/resistance levels using volume profiles or other techniques.
+3.  **`app/analytics_engine.py` (Market Analytics Engine - Input Provider)**
+    *   **Role Redefined**: Performs advanced analysis on raw market data to generate features and structured analytical insights. These are *inputs to the AI Agent*, not direct trade decisions.
 
-4.  **`app/prediction_engine.py` (AI Prediction Engine)**
-    *   Houses Machine Learning (ML) and AI models for forecasting price movements, market trends, and classifying market regimes (trending, ranging, volatile).
-    *   May integrate Natural Language Processing (NLP) for sentiment analysis from social media or news feeds.
-    *   Manages model training, evaluation, and persistence (e.g., using `scikit-learn`, `PyTorch`, `joblib`).
-    *   Can employ reinforcement learning techniques to optimize strategy parameters over time.
+4.  **`app/prediction_engine.py` (AI Prediction Engine - Input Provider)**
+    *   **Role Redefined**: Houses ML/AI models for forecasts, regime classification, sentiment analysis. Its outputs are crucial *inputs for the AI Agent*.
 
-5.  **`app/strategy_framework.py` (Strategy Framework)**
-    *   Provides base classes (`Strategy`, `Signal`) and a structured way to define, test, and manage various trading strategies.
-    *   Allows for pluggable strategies, making it easy to add new ones.
-    *   `strategy_evaluator.py` is used to backtest strategies against historical data and calculate performance metrics (Sharpe ratio, ROI, drawdown).
-    *   `strategy_debug.py` offers tools to inspect and debug strategy behavior.
+5.  **`app/strategy_framework.py` & `app/strategies/*` (Signal/Feature Modules - Input Providers)**
+    *   **Role Redefined**: `BaseStrategy` defines an interface for modules that generate specific analytical signals, scores, or features based on their internal logic. The outputs of these strategy modules are *inputs to the AI Agent*.
 
-6.  **`app/security/security.py` (Token Security Analyzer)**
-    *   Performs due diligence on Solana tokens before trading.
-    *   Validates token addresses and checks for known scam patterns or rug pull indicators.
-    *   Analyzes token liquidity, holder distribution, and other on-chain metrics to assess risk.
-    *   Aims to protect the bot from interacting with malicious or extremely high-risk assets.
+6.  **`app/ai_agent.py` (Central AI Agent - New Core Component)**
+    *   **Rôle**: The definitive decision-making unit of NumerusX.
+    *   Receives a comprehensive set of inputs: market data, technical analyses from `analytics_engine`, predictions from `prediction_engine`, signals from various `strategies`, risk parameters from `risk_manager`, security assessments from `security_checker`, and current portfolio status from `portfolio_manager`.
+    *   Contains the core intelligence (e.g., advanced ML model, ensemble, RL agent) to synthesize these diverse inputs.
+    *   Outputs a final, actionable trade order (buy, sell, hold, amount, SL/TP) or a decision to take no action, along with a log of its reasoning.
 
-7.  **`app/risk_manager.py` (Risk Management System)**
-    *   Implements crucial risk controls for trading operations.
-    *   Calculates optimal position sizes based on methodologies like the Kelly Criterion, adjusted for current volatility and account size.
-    *   Manages overall portfolio exposure, potentially considering asset correlations.
-    *   Can enforce dynamic stop-loss and take-profit levels based on market volatility (e.g., using ATR).
-    *   May include circuit breakers to halt trading during severe drawdowns.
+7.  **`app/dex_bot.py` (Orchestrator)**
+    *   **Role Redefined**: Manages the primary operational loop.
+    *   Orchestrates the collection of data from all provider modules (`MarketDataProvider`, `AnalyticsEngine`, `PredictionEngine`, `StrategyFramework` modules, `RiskManager`, `SecurityChecker`, `PortfolioManager`).
+    *   Passes the aggregated set of inputs to the `AIAgent`.
+    *   Receives the final trade decision from the `AIAgent`.
+    *   Instructs the `TradeExecutor` to carry out the AI Agent's decision.
 
-8.  **`app/trading/trading_engine.py` (Trading Execution Engine)**
-    *   Handles the direct interaction with Solana Decentralized Exchanges (DEXs), primarily Jupiter, to execute trades.
-    *   Constructs, signs, and submits transactions to the Solana network.
-    *   Manages transaction fee estimation (including priority fees) to optimize execution.
-    *   Includes robust error handling and retry mechanisms for transaction submissions, accounting for network congestion or DEX-specific issues.
-    *   Aims for best price execution and manages slippage according to configured limits.
-    *   May implement advanced order types (limit orders, DCA) if supported by the DEX APIs.
+8.  **`app/risk_manager.py` (Risk Information Provider)**
+    *   **Role Redefined**: Calculates risk metrics, potential position sizes based on overall portfolio risk, drawdown limits, etc. These serve as critical *constraints and inputs for the AI Agent*.
 
-9.  **`app/dex_bot.py` (Core Bot Orchestrator)**
-    *   The central "brain" that ties all other components together.
-    *   Runs the main trading loop: fetches market data, gets analysis and predictions, applies the selected strategy, checks risk, and executes trades via the `TradingEngine`.
-    *   Manages the state of active trades and the portfolio.
-    *   Interfaces with the `Database` to log trades and decisions.
+9.  **`app/security/security.py` (Security Information Provider)**
+    *   **Role Redefined**: Provides security assessments of tokens as *input to the AI Agent*.
 
-10. **`app/database.py` (Database Interface)**
-    *   Manages the persistence of data, such as trade history, blacklisted tokens, strategy performance metrics, and configuration settings.
-    *   Uses SQLite for local data storage.
-    *   Handles database initialization and potential schema migrations.
+10. **`app/portfolio_manager.py` (Portfolio State Provider)**
+    *   **Role Redefined**: Tracks current holdings and cash balance. This state is an *input to the AI Agent*. It is updated by `TradeExecutor` after trades.
 
-11. **`app/dashboard.py` & `app/gui.py` (User Interface)**
-    *   Provides a web-based dashboard (using `NiceGUI`) for users to monitor the bot\'s activity, view portfolio performance, analyze market data, and control bot operations (start/stop, adjust settings).
-    *   Aims for real-time updates and clear visualizations. `gui.py` might contain older or helper UI elements.
+11. **`app/trade_executor.py` & `app/trading/trading_engine.py` (Execution Layer)**
+    *   (Largely unchanged role) `TradeExecutor` takes the specific trade order (now originating from the AI Agent via `DexBot`) and uses `TradingEngine` to interact with the Solana DEXs.
 
-12. **`app/main.py` (Application Entry Point)**
-    *   Initializes and starts the core application components, including the `DexBot` and the `Dashboard`.
+12. **`app/database.py` (Data Persistence)**
+    *   (Largely unchanged) Stores trades, blacklists, etc. Will now also store the AI Agent's decisions and its reasoning logs.
 
-This structure is designed to be modular, allowing for independent development and testing of each component, while facilitating complex interactions to achieve intelligent and automated trading.
+13. **`app/dashboard.py` (User Interface)**
+    *   Will be enhanced to display information about the AI Agent's decisions, its reasoning, and the key inputs it considered.
 
 ## Getting Started
 

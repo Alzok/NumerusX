@@ -419,85 +419,113 @@ class SecurityChecker:
 
     async def _get_onchain_metrics(self, token_address: str) -> List[SecurityRisk]:
         """
-        Analyse les métriques on-chain du token avec analyse de profondeur de liquidité.
+        Analyse les métriques on-chain du token, y compris les informations sur le token et la liquidité.
         
         Args:
             token_address: Adresse du token Solana
             
         Returns:
-            Liste des risques détectés
+            Liste des risques détectés liés aux métriques on-chain.
         """
         risks = []
         try:
             if not self.market_data:
-                return [SecurityRisk(
-                    risk_type="missing_market_data",
+                logger.warning("MarketDataProvider non disponible dans SecurityChecker pour _get_onchain_metrics.")
+                risks.append(SecurityRisk(
+                    risk_type="market_data_unavailable",
                     severity=3,
-                    description="Fournisseur de données de marché non disponible",
-                    metadata={}
-                )]
-                
-            # Obtenir les données de liquidité
-            liquidity_data = await self.market_data.get_liquidity_data(token_address)
+                    description="MarketDataProvider non disponible pour récupérer les métriques on-chain.",
+                    metadata={"token_address": token_address}
+                ))
+                return risks # Cannot proceed without market_data
+
+            # 1. Obtenir les informations générales du token
+            token_info_result = await self.market_data.get_token_info(token_address)
+            if not token_info_result['success']:
+                error_msg = f"Échec de la récupération des informations du token {token_address}: {token_info_result.get('error')}"
+                logger.warning(error_msg)
+                risks.append(SecurityRisk(
+                    risk_type="token_info_fetch_failed",
+                    severity=5,
+                    description=error_msg,
+                    metadata={"token_address": token_address, "source_error": token_info_result.get('error')}
+                ))
+            else:
+                token_info = token_info_result['data']
+                if not token_info:
+                    risks.append(SecurityRisk(
+                        risk_type="empty_token_info",
+                        severity=5,
+                        description=f"Aucune information de token retournée pour {token_address} malgré une réponse réussie.",
+                        metadata={"token_address": token_address}
+                    ))
+                else:
+                    # Exemple d'analyse des informations du token (si nécessaire)
+                    # Par exemple, vérifier si le token a un nom ou un symbole (déjà fait par MDP maintenant)
+                    if not token_info.get('name') or not token_info.get('symbol'):
+                        risks.append(SecurityRisk(
+                            risk_type="missing_token_metadata",
+                            severity=3,
+                            description=f"Nom ou symbole manquant pour le token {token_address}.",
+                            metadata={"token_address": token_address, "retrieved_info": token_info}
+                        ))
             
-            # Analyser la liquidité
-            if liquidity_data:
-                usd_liquidity = liquidity_data.get("liquidity_usd", 0)
-                
-                # Vérifier le montant de la liquidité
-                if usd_liquidity < 1000:
+            # 2. Obtenir et analyser les données de liquidité
+            liquidity_data_result = await self.market_data.get_liquidity_data(token_address)
+            
+            if not liquidity_data_result['success']:
+                error_msg = f"Échec de la récupération des données de liquidité pour {token_address}: {liquidity_data_result.get('error')}"
+                logger.warning(error_msg)
+                risks.append(SecurityRisk(
+                    risk_type="liquidity_data_fetch_failed",
+                    severity=7, # Higher severity as liquidity is crucial
+                    description=error_msg,
+                    metadata={"token_address": token_address, "source_error": liquidity_data_result.get('error')}
+                ))
+            else:
+                liquidity_info = liquidity_data_result['data']
+                if not liquidity_info or liquidity_info.get("liquidity_usd") is None: # Ensure liquidity_usd is present
                     risks.append(SecurityRisk(
-                        risk_type="very_low_liquidity",
-                        severity=9,
-                        description=f"Très faible liquidité: ${usd_liquidity:.2f}",
-                        metadata={"liquidity_usd": usd_liquidity}
-                    ))
-                elif usd_liquidity < 10000:
-                    risks.append(SecurityRisk(
-                        risk_type="low_liquidity",
+                        risk_type="empty_or_invalid_liquidity_data",
                         severity=6,
-                        description=f"Faible liquidité: ${usd_liquidity:.2f}",
-                        metadata={"liquidity_usd": usd_liquidity}
+                        description=f"Données de liquidité vides ou invalides pour {token_address}. USD liquidity missing.",
+                        metadata={"token_address": token_address, "retrieved_liquidity_info": liquidity_info}
                     ))
+                else:
+                    usd_liquidity = liquidity_info.get("liquidity_usd", 0)
+                    logger.info(f"Liquidité pour {token_address}: ${usd_liquidity:.2f} USD")
+
+                    if usd_liquidity < Config.MIN_LIQUIDITY_THRESHOLD_ERROR:
+                        risks.append(SecurityRisk(
+                            risk_type="critically_low_liquidity",
+                            severity=9,
+                            description=f"Liquidité critique: ${usd_liquidity:.2f} USD (Seuil: ${Config.MIN_LIQUIDITY_THRESHOLD_ERROR}).",
+                            metadata={"liquidity_usd": usd_liquidity, "threshold": Config.MIN_LIQUIDITY_THRESHOLD_ERROR}
+                        ))
+                    elif usd_liquidity < Config.MIN_LIQUIDITY_THRESHOLD_WARNING:
+                        risks.append(SecurityRisk(
+                            risk_type="low_liquidity_warning",
+                            severity=6,
+                            description=f"Faible liquidité: ${usd_liquidity:.2f} USD (Seuil avertissement: ${Config.MIN_LIQUIDITY_THRESHOLD_WARNING}).",
+                            metadata={"liquidity_usd": usd_liquidity, "threshold": Config.MIN_LIQUIDITY_THRESHOLD_WARNING}
+                        ))
                     
-                # NOUVELLE FONCTIONNALITÉ: Analyse de la profondeur de liquidité
-                if "depth" in liquidity_data:
-                    depth = liquidity_data["depth"]
-                    
-                    # Calculer l'impact de prix pour un ordre de 1000 USD
-                    if "price_impact_1000usd" in depth:
-                        impact = depth["price_impact_1000usd"]
-                        if impact > 0.1:  # Plus de 10% d'impact
-                            risks.append(SecurityRisk(
-                                risk_type="high_price_impact",
-                                severity=7,
-                                description=f"Impact de prix élevé: {impact*100:.1f}% pour un ordre de 1000 USD",
-                                metadata={"price_impact": impact}
-                            ))
-                    
-                    # Calculer la variance de profondeur
-                    if "buy_depth" in depth and "sell_depth" in depth:
-                        buy_depth = depth["buy_depth"]
-                        sell_depth = depth["sell_depth"]
-                        depth_ratio = min(buy_depth, sell_depth) / max(buy_depth, sell_depth) if max(buy_depth, sell_depth) > 0 else 0
-                        
-                        if depth_ratio < 0.2:  # Déséquilibre important
-                            risks.append(SecurityRisk(
-                                risk_type="imbalanced_liquidity",
-                                severity=6,
-                                description=f"Déséquilibre de liquidité: ratio {depth_ratio:.2f}",
-                                metadata={"depth_ratio": depth_ratio, "buy_depth": buy_depth, "sell_depth": sell_depth}
-                            ))
+                    # TODO: Analyse de profondeur de liquidité et impact de prix, si les données sont disponibles
+                    # via self.market_data.get_liquidity_data() et que 'depth' est dans liquidity_info.
+                    # Cette partie était présente avant, elle doit être adaptée au format de `liquidity_info`
+                    # if "depth" in liquidity_info: ...
             
             return risks
+            
         except Exception as e:
-            logger.error(f"Erreur lors de l'analyse des métriques on-chain pour {token_address}: {e}")
-            return [SecurityRisk(
-                risk_type="metrics_analysis_error",
-                severity=4,
-                description=f"Erreur lors de l'analyse des métriques on-chain: {str(e)}",
-                metadata={"error": str(e)}
-            )]
+            logger.error(f"Erreur inattendue lors de l'analyse des métriques on-chain pour {token_address}: {str(e)}", exc_info=True)
+            risks.append(SecurityRisk(
+                risk_type="onchain_metrics_unexpected_error",
+                severity=5,
+                description=f"Erreur inattendue lors de l'analyse des métriques on-chain: {str(e)}",
+                metadata={"token_address": token_address, "error": str(e)}
+            ))
+            return risks
 
     async def _detect_rugpull_patterns(self, token_address: str) -> List[SecurityRisk]:
         """

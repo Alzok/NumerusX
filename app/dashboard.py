@@ -9,6 +9,8 @@ import time
 import psutil
 import logging
 from collections import deque
+import random
+import math
 
 from app.dex_bot import DexBot, PerformanceMonitor
 from app.database import EnhancedDatabase
@@ -29,12 +31,17 @@ class NumerusXDashboard:
             bot: Instance of DexBot to monitor and control
         """
         self.bot = bot
-        self.db = EnhancedDatabase()
-        self.dex_api = DexAPI()
-        self.analytics = AdvancedTradingStrategy()
+        # Source components from the bot instance
+        self.db = self.bot.portfolio_manager.db # Access db via portfolio_manager
+        self.market_data_provider = self.bot.market_data_provider
+        self.analytics_engine = self.bot.strategy # Assuming strategy is the analytics engine
+        self.portfolio_manager = self.bot.portfolio_manager
+        self.risk_manager = self.bot.risk_manager
+        self.trade_executor = self.bot.trade_executor
+        self.config = Config # For accessing general config parameters
         
-        # Performance monitoring
-        self.performance = PerformanceMonitor()
+        # Performance monitoring - use the one from bot
+        self.performance_monitor = self.bot.performance_monitor 
         self.system_metrics = {
             'cpu': deque(maxlen=60),
             'memory': deque(maxlen=60),
@@ -43,34 +50,67 @@ class NumerusXDashboard:
             'error_count': 0
         }
         
-        # UI components
+        # UI components - Initialized to None, will be created in init_ui
         self.status_indicator = None
         self.portfolio_value_card = None
         self.portfolio_change_card = None
         self.portfolio_chart = None
+        self.asset_allocation_chart = None # Ensure this is initialized
+        self.holdings_table = None # Ensure this is initialized
         self.trades_table = None
+        self.success_rate_chart = None # Ensure this is initialized
+        self.volume_chart = None # Ensure this is initialized
+        self.trade_distribution_chart = None # Ensure this is initialized
+        self.trade_time_distribution = None # Ensure this is initialized
         self.market_condition_indicator = None
+        self.market_condition_label = None 
+        self.watchlist_table = None 
+        self.price_chart_token_selector = None 
+        self.price_chart = None # Ensure this is initialized
+        self.rsi_chart = None # Ensure this is initialized
+        self.macd_chart = None # Ensure this is initialized
+        self.bb_chart = None # Ensure this is initialized
         self.toggle_btn = None
         self.risk_slider = None
+        self.manual_input_token_select = None # Ensure this is initialized
+        self.manual_output_token_select = None # Ensure this is initialized
+        self.manual_trade_amount_input = None # Ensure this is initialized
+        self.estimated_fee_label = None # Ensure this is initialized
+        self.slippage_slider = None # Ensure this is initialized
+        self.max_order_size_input = None # Ensure this is initialized
+        self.max_open_positions_input = None # Ensure this is initialized
+        self.trading_update_interval_input = None # Ensure this is initialized
+        self.uptime_label = None # Ensure this is initialized
+        self.engine_status = None # Ensure this is initialized
+        self.market_api_status = None # Ensure this is initialized
+        self.db_status = None # Ensure this is initialized
+        self.cpu_chart = None # Ensure this is initialized
+        self.memory_chart = None # Ensure this is initialized
+        self.latency_chart = None # Ensure this is initialized
+        self.error_log_area = None # Ensure this is initialized
         
+        # State for Control Panel parameters
+        self.current_slippage_display = f"Current: {self.config.SLIPPAGE_BPS / 100.0:.2f}% ({self.config.SLIPPAGE_BPS} BPS)"
+        # State for manual trade
+        self.input_token = self.config.BASE_ASSET
+        self.output_token = 'SOL' # Default example
+        self.trade_amount = 0.0
+
         # State
-        self.selected_token = None
+        self.selected_token = None # For market analysis price chart
         self.refresh_rate = 2.0  # seconds
-        self.theme = 'light'
-        self.asset_data = {}
-        self.error_log = deque(maxlen=100)
+        self.theme = 'dark' # Default theme, will be applied in init_ui by dark_mode().enable() if true
+        self.error_log = deque(maxlen=100) # For system monitor log
         
         # Start monitoring tasks
-        self.is_running = True
-        self.start_time = time.time()
+        self.is_running = True # Controls the main update loop
+        self.start_time = time.time() # For uptime calculation
         
+        # Store timer instance for potential modification
+        self.dashboard_update_timer = None 
+
         # Initialize UI
-        self.init_ui()
-        
-        # Start update tasks
-        ui.timer(self.refresh_rate, self.update_dashboard)
-        ui.timer(5.0, self.update_system_metrics)
-        ui.timer(60.0, self.update_historical_data)
+        self.init_ui() # This will build all UI elements & start timers
 
     def init_ui(self):
         """Initialize the comprehensive dashboard UI."""
@@ -91,9 +131,14 @@ class NumerusXDashboard:
                     with ui.menu().classes('w-72'):
                         ui.label('Settings').classes('text-lg font-bold px-4 py-2')
                         ui.separator()
-                        ui.switch('Dark Mode', value=self.theme == 'dark').bind_value_to(self, 'theme_enabled').on('change', self.toggle_theme)
-                        ui.number('Refresh Rate (seconds)', value=self.refresh_rate, min=1, max=10).bind_value_to(self, 'refresh_rate')
-                        ui.button('Reset Performance Data', on_click=self.reset_performance_data).props('outline')
+                        ui.switch('Dark Mode', value=self.theme == 'dark').on('change', self.toggle_theme)
+                        ui.number('Refresh Rate (s)', value=self.refresh_rate, min=1, max=10, step=0.5, suffix='s').bind_value(self, 'refresh_rate').on('update:model-value', self.update_refresh_rate)
+                        ui.separator()
+                        ui.label('Notifications (Placeholder)').classes('text-md px-4 py-1 text-gray-500')
+                        ui.checkbox('Enable Trade Notifications').classes('px-4')
+                        ui.checkbox('Enable Error Notifications').classes('px-4')
+                        ui.separator()
+                        ui.button('Reset Performance Data', on_click=self.reset_performance_data).props('outline flat').classes('mx-4 my-2')
 
         # Main container with tabs
         with ui.tabs().classes('w-full') as tabs:
@@ -273,12 +318,12 @@ class NumerusXDashboard:
                     icon='emergency'
                 ).props('unelevated color=red').classes('w-full mb-4')
                 
-                ui.label('Risk Level').classes('text-md mt-4')
+                ui.label('Trade Confidence Threshold').classes('text-md mt-4')
                 self.risk_slider = ui.slider(
                     min=0.1,
                     max=1.0,
                     step=0.05,
-                    value=Config.TRADE_THRESHOLD
+                    value=self.config.TRADE_CONFIDENCE_THRESHOLD
                 ).props('label label-always').on('change', self.update_risk_level)
                 
                 ui.label('Strategy').classes('text-md mt-4')
@@ -298,22 +343,22 @@ class NumerusXDashboard:
                 
                 with ui.row().classes('w-full items-end gap-4'):
                     with ui.column().classes('w-1/3'):
-                        ui.select(
-                            options=[],
+                        self.manual_input_token_select = ui.select(
+                            options=[self.config.BASE_ASSET, 'SOL'],
                             label='Input Token',
-                            value='USDC'
-                        ).classes('w-full').bind_value_to(self, 'input_token')
+                            value=self.config.BASE_ASSET
+                        ).classes('w-full').bind_value(self, 'input_token')
                     
                     ui.icon('swap_horiz', size='lg').classes('mb-2')
                     
                     with ui.column().classes('w-1/3'):
-                        ui.select(
-                            options=[],
+                        self.manual_output_token_select = ui.select(
+                            options=['SOL', self.config.BASE_ASSET],
                             label='Output Token'
-                        ).classes('w-full').bind_value_to(self, 'output_token')
+                        ).classes('w-full').bind_value(self, 'output_token')
                     
                     with ui.column().classes('w-1/5'):
-                        ui.number(label='Amount', format='%.2f').classes('w-full').bind_value_to(self, 'trade_amount')
+                        self.manual_trade_amount_input = ui.number(label='Amount', format='%.2f').classes('w-full').bind_value(self, 'trade_amount')
                 
                 with ui.row().classes('w-full justify-between mt-4'):
                     ui.label('Estimated Fee: ').classes('text-sm')
@@ -330,26 +375,35 @@ class NumerusXDashboard:
             with ui.grid(columns=2).classes('w-full gap-4'):
                 # Column 1
                 with ui.card().classes('p-4'):
-                    ui.label('Slippage Tolerance').classes('font-bold')
-                    ui.slider(min=0.1, max=3.0, step=0.1, value=Config.SLIPPAGE * 100).classes('w-full')
-                    ui.label('Applies to all trades').classes('text-xs text-gray-500')
-                
+                    ui.label('Slippage Tolerance (%)').classes('font-bold')
+                    self.slippage_slider = ui.slider(
+                        min=0.1, max=3.0, step=0.05, 
+                        value=self.config.SLIPPAGE_BPS / 100.0
+                    ).classes('w-full').on('update:model-value', self.update_slippage_tolerance)
+                    ui.label(f"Current: {self.current_slippage_display}").classes('text-xs text-gray-500').bind_text_from(self, 'current_slippage_display')
+
                 # Column 2
                 with ui.card().classes('p-4'):
-                    ui.label('Max Position Size').classes('font-bold')
-                    ui.number(value=Config.MAX_ORDER_SIZE, format='%.2f').classes('w-full')
+                    ui.label('Max Order Size (USD)').classes('font-bold')
+                    self.max_order_size_input = ui.number(
+                        value=self.config.MAX_ORDER_SIZE_USD, format='%.2f'
+                    ).classes('w-full').on('update:model-value', lambda e: self.update_config_value('MAX_ORDER_SIZE_USD', e.value, float))
                     ui.label('Maximum order size in USD').classes('text-xs text-gray-500')
                 
                 # Column 3  
                 with ui.card().classes('p-4'):
-                    ui.label('Max Positions').classes('font-bold')
-                    ui.number(value=Config.MAX_POSITIONS, format='%d', min=1, max=20).classes('w-full')
+                    ui.label('Max Open Positions').classes('font-bold')
+                    self.max_open_positions_input = ui.number(
+                        value=self.config.MAX_OPEN_POSITIONS, format='%d', min=1, max=20
+                    ).classes('w-full').on('update:model-value', lambda e: self.update_config_value('MAX_OPEN_POSITIONS', e.value, int))
                     ui.label('Maximum number of concurrent positions').classes('text-xs text-gray-500')
                 
                 # Column 4
                 with ui.card().classes('p-4'):
-                    ui.label('Update Interval').classes('font-bold')
-                    ui.number(value=Config.UPDATE_INTERVAL, format='%d', min=5, max=300).classes('w-full')
+                    ui.label('Trading Update Interval (s)').classes('font-bold')
+                    self.trading_update_interval_input = ui.number(
+                        value=self.config.TRADING_UPDATE_INTERVAL_SECONDS, format='%d', min=5, max=300
+                    ).classes('w-full').on('update:model-value', lambda e: self.update_config_value('TRADING_UPDATE_INTERVAL_SECONDS', e.value, int))
                     ui.label('Time between bot cycles in seconds').classes('text-xs text-gray-500')
 
     def _build_system_monitor_panel(self):
@@ -402,160 +456,280 @@ class NumerusXDashboard:
             self.error_log_area = ui.log().classes('w-full h-64 font-mono text-xs')
 
     async def update_dashboard(self):
-        """Update all dashboard components with latest data."""
+        """Main UI update orchestrator, called by timer."""
+        if not self.is_running:
+            return
+
         try:
             # Update bot status indicator
-            self.status_indicator.props(f'color={"green" if self.bot.active else "red"}')
-            
-            # Update portfolio data
+            if self.status_indicator:
+                active_status = hasattr(self.bot, 'active') and self.bot.active
+                self.status_indicator.props(f'color={"green" if active_status else "red"}')
+                self.status_indicator.tooltip(f'Bot Status: {"Running" if active_status else "Stopped"}')
+
+            # Update various panels
             await self.update_portfolio_data()
-            
-            # Update trading activity
             await self.update_trading_activity()
-            
-            # Update market analysis
             await self.update_market_analysis()
-            
-            # Update control center
-            self.update_control_center()
-            
+            self.update_control_center() # Typically updates based on bot state, can be sync
+            # System metrics are updated by a separate timer (update_system_metrics)
+
+            # Refresh UI (NiceGUI handles this implicitly for bound elements, but explicit refresh might be needed for complex components)
+            # ui.update() # Consider if needed for specific components like tables or charts not using direct binding.
         except Exception as e:
-            logger.error(f"Error updating dashboard: {str(e)}")
-            self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - Dashboard update error: {str(e)}")
-            self.error_log_area.push(f"ERROR: Dashboard update failed: {str(e)}")
-            self.system_metrics['error_count'] += 1
-    
+            logger.error(f"Error updating dashboard: {e}", exc_info=True)
+            self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - Dashboard Update Error: {e}")
+            if self.error_log_area: # Check if error_log_area is initialized
+                self.error_log_area.push(f"ERROR: Dashboard update failed - {e}")
+
     async def update_portfolio_data(self):
-        """Update portfolio overview data."""
+        """Updates the portfolio overview panel with the latest data."""
         try:
-            # Get portfolio value from bot
-            portfolio_value = self.bot.portfolio.current_balance
-            
-            # Update portfolio value card
-            self.portfolio_value_card.text = f"${portfolio_value:,.2f}"
-            
-            # Get historical portfolio values for change calculation
-            yesterday_value = portfolio_value * 0.98  # Placeholder - should be from actual historical data
-            change_pct = ((portfolio_value - yesterday_value) / yesterday_value) * 100
-            change_color = "green" if change_pct >= 0 else "red"
-            
-            # Update change card
-            self.portfolio_change_card.text = f"{change_pct:+.2f}%"
-            self.portfolio_change_card.style(f"color: {change_color}")
-            
-            # Get asset allocation data
-            holdings = await self.get_holdings()
-            
-            # Update asset allocation chart
-            self.update_asset_allocation_chart(holdings)
-            
-            # Update holdings table
-            holdings_rows = []
-            for asset in holdings:
-                holdings_rows.append({
-                    'asset': asset['symbol'],
-                    'amount': f"{asset['amount']:.4f}",
-                    'price': f"${asset['price']:.4f}",
-                    'value': f"${asset['value']:.2f}",
-                    'change': f"{asset['change']:+.2f}%"
-                })
-            self.holdings_table.rows = holdings_rows
-            
-            # Update performance chart
-            self.update_performance_chart('1d')
-            
-        except Exception as e:
-            logger.error(f"Error updating portfolio data: {str(e)}")
-            self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - Portfolio update error: {str(e)}")
-    
-    async def update_trading_activity(self):
-        """Update trading activity data."""
-        try:
-            # Get recent trades from database
-            trades = self.db.get_active_trades()
-            
-            # Update trades table
-            trades_rows = []
-            for trade in trades:
-                # Get current price
-                current_price = self.dex_api.get_price(trade['pair_address'])
+            # 1. Total Portfolio Value
+            total_value = self.portfolio_manager.get_total_portfolio_value(self.market_data_provider)
+            if self.portfolio_value_card:
+                self.portfolio_value_card.set_text(f"${total_value:,.2f}")
+
+            # 2. 24h Change % (Placeholder logic)
+            # Requires historical portfolio data. PerformanceMonitor or RiskManager might have this.
+            # For now, a placeholder.
+            # Example: use self.performance_monitor.history
+            change_24h_pct = 0.0 
+            if self.performance_monitor and self.performance_monitor.history:
+                # Simplified: check last value vs value approx 24h ago
+                now = time.time()
+                one_day_ago = now - 24 * 3600
+                current_val_entry = self.performance_monitor.history[-1] if self.performance_monitor.history else None
                 
-                # Calculate P&L
-                entry_price = trade.get('entry_price', 0)
-                if entry_price and current_price:
-                    pnl_pct = ((current_price - entry_price) / entry_price) * 100
-                    pnl_color = "green" if pnl_pct >= 0 else "red"
-                    pnl_text = f"<span style='color:{pnl_color}'>{pnl_pct:+.2f}%</span>"
+                past_val_entry = None
+                for entry in reversed(self.performance_monitor.history):
+                    if entry['timestamp'] <= one_day_ago:
+                        past_val_entry = entry
+                        break
+                
+                if current_val_entry and past_val_entry and past_val_entry['value'] > 0:
+                    change_24h_pct = ((current_val_entry['value'] - past_val_entry['value']) / past_val_entry['value']) * 100
+                elif current_val_entry: # If no past data, assume change from initial if that's what current_val_entry['value'] represents
+                     if Config.INITIAL_PORTFOLIO_BALANCE_USD > 0 :
+                        change_24h_pct = ((current_val_entry['value'] - Config.INITIAL_PORTFOLIO_BALANCE_USD) / Config.INITIAL_PORTFOLIO_BALANCE_USD) * 100
+
+
+            if self.portfolio_change_card:
+                self.portfolio_change_card.set_text(f"{change_24h_pct:+.2f}%")
+                self.portfolio_change_card.classes(remove='text-positive text-negative')
+                if change_24h_pct >= 0:
+                    self.portfolio_change_card.classes(add='text-positive')
                 else:
-                    pnl_text = "N/A"
-                
-                # Format timestamp
-                timestamp = datetime.fromtimestamp(trade.get('timestamp', time.time()))
-                
-                trades_rows.append({
-                    'time': timestamp.strftime('%H:%M:%S'),
-                    'pair': trade['pair_address'],
-                    'type': 'BUY',  # Placeholder - should determine from actual data
-                    'amount': f"${trade['amount']:.2f}",
-                    'price': f"${entry_price:.4f}",
-                    'pnl': pnl_text,
-                    'status': trade.get('status', 'open')
-                })
-            self.trades_table.rows = trades_rows
+                    self.portfolio_change_card.classes(add='text-negative')
             
-            # Update success rate chart
-            self.update_success_rate_chart()
-            
-            # Update volume chart
-            self.update_volume_chart()
-            
-            # Update trade distribution charts
-            self.update_trade_distribution_charts()
-            
+            # 3. Asset Allocation (Placeholder - needs PortfolioManager to provide detailed holdings)
+            # holdings_data = self.portfolio_manager.get_detailed_holdings() # Method to be implemented
+            # For now, mock data for chart structure
+            mock_allocation_data = pd.DataFrame([
+                {'asset': 'SOL', 'value': total_value * 0.4 if total_value > 0 else 1000}, 
+                {'asset': 'USDC', 'value': total_value * 0.3 if total_value > 0 else 800}, 
+                {'asset': 'Other', 'value': total_value * 0.3 if total_value > 0 else 600}
+            ])
+            if self.asset_allocation_chart and not mock_allocation_data.empty:
+                fig_alloc = px.pie(mock_allocation_data, values='value', names='asset', title='Asset Allocation (Mock)')
+                fig_alloc.update_layout(margin=dict(t=30, b=0, l=0, r=0), showlegend=False)
+                self.asset_allocation_chart.update_figure(fig_alloc)
+
+            # 4. Performance Graph (Using self.performance_monitor.history)
+            if self.portfolio_chart and self.performance_monitor:
+                history_df = pd.DataFrame(self.performance_monitor.history)
+                if not history_df.empty and 'timestamp' in history_df.columns and 'value' in history_df.columns:
+                    history_df['datetime'] = pd.to_datetime(history_df['timestamp'], unit='s')
+                    fig_perf = px.line(history_df, x='datetime', y='value', title='Portfolio Value Over Time')
+                    fig_perf.update_layout(margin=dict(t=30, b=0, l=0, r=0))
+                    self.portfolio_chart.update_figure(fig_perf)
+                else: # Show empty chart if no data
+                    self.portfolio_chart.update_figure(go.Figure())
+
+
+            # 5. Top Holdings Table (Placeholder - needs PortfolioManager for detailed holdings)
+            # current_holdings = self.portfolio_manager.get_current_holdings_with_details() # Method to be implemented
+            # For now, mock data for table structure
+            mock_holdings_rows = [
+                {'asset': 'SOL', 'amount': 10, 'price': total_value * 0.04 if total_value > 0 else 100, 'value': total_value * 0.4 if total_value > 0 else 1000, 'change': '+2.5%'},
+                {'asset': 'USDC', 'amount': (total_value * 0.3 if total_value > 0 else 800) , 'price': 1.00, 'value': total_value * 0.3 if total_value > 0 else 800, 'change': '+0.01%'}
+            ]
+            if self.holdings_table:
+                 self.holdings_table.rows = mock_holdings_rows
+        
         except Exception as e:
-            logger.error(f"Error updating trading activity: {str(e)}")
-            self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - Trading activity update error: {str(e)}")
-    
-    async def update_market_analysis(self):
-        """Update market analysis data."""
+            logger.error(f"Error updating portfolio data: {e}", exc_info=True)
+            self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - Portfolio Update Error: {e}")
+            if self.error_log_area:
+                self.error_log_area.push(f"ERROR: Portfolio data update failed - {e}")
+
+    async def update_trading_activity(self):
+        """Updates the trading activity panel with the latest data."""
         try:
-            # Update market condition indicator
-            market_condition = await self.get_market_condition()
-            if market_condition == 'bullish':
-                self.market_condition_indicator.props('icon=trending_up color=green')
-                self.market_condition_label.text = 'Bullish'
-                self.market_condition_label.style('color: green')
-            elif market_condition == 'bearish':
-                self.market_condition_indicator.props('icon=trending_down color=red')
-                self.market_condition_label.text = 'Bearish'
-                self.market_condition_label.style('color: red')
-            else:
-                self.market_condition_indicator.props('icon=trending_flat color=gray')
-                self.market_condition_label.text = 'Neutral'
-                self.market_condition_label.style('color: gray')
+            # 1. Recent Trades Table
+            trades_data = self.db.get_trades(limit=50) # Fetch last 50 trades
+            trade_rows = []
+            if trades_data:
+                for trade in trades_data:
+                    # Assuming trade is a dict-like object or a tuple that can be indexed
+                    # Adapt keys based on actual EnhancedDatabase.get_trades() return format
+                    # Example keys: id, timestamp, pair, amount, entry_price, exit_price, pnl, status, protocol
+                    trade_type = "Achat" # Placeholder, determine from trade data if possible (e.g. positive/negative amount for base asset)
+                    if 'side' in trade: # Or some other indicator of trade direction
+                        trade_type = trade['side']
+                    elif 'amount' in trade and trade['amount'] < 0: # Example for short selling if tracked
+                        trade_type = "Vente"
+                    
+                    pnl_value = trade.get('pnl', 0.0) if trade.get('pnl') is not None else 0.0
+                    amount_value = trade.get('amount', 0.0) if trade.get('amount') is not None else 0.0
+                    entry_price_value = trade.get('entry_price', 0.0) if trade.get('entry_price') is not None else 0.0
+
+                    trade_rows.append({
+                        'time': datetime.fromisoformat(trade['timestamp']).strftime('%Y-%m-%d %H:%M:%S') if isinstance(trade.get('timestamp'), str) else trade.get('timestamp', 'N/A'),
+                        'pair': trade.get('pair', 'N/A'),
+                        'type': trade_type,
+                        'amount': f"{amount_value:,.2f}", # Assuming amount is in USD or a standard unit
+                        'price': f"{entry_price_value:,.4f}", # Entry price
+                        'pnl': f"{pnl_value:,.2f}" if trade.get('status') == 'closed' else '-', # P&L for closed trades
+                        'status': trade.get('status', 'N/A').title()
+                    })
             
-            # Update trading opportunities table
-            opportunities = await self.get_trading_opportunities()
-            opportunity_rows = []
-            for opp in opportunities:
-                opportunity_rows.append({
-                    'token': opp['symbol'],
-                    'score': f"{opp['score']:.2f}",
-                    'action': opp['action']
-                })
-            self.watchlist_table.rows = opportunity_rows
+            if self.trades_table:
+                self.trades_table.rows = trade_rows
+
+            # 2. Trade Success Rate (Placeholder logic)
+            if trades_data and self.success_rate_chart:
+                closed_trades = [t for t in trades_data if t.get('status') == 'closed' and t.get('pnl') is not None]
+                wins = sum(1 for t in closed_trades if t['pnl'] > 0)
+                losses = len(closed_trades) - wins
+                success_rate_data = pd.DataFrame([
+                    {'category': 'Wins', 'count': wins},
+                    {'category': 'Losses', 'count': losses}
+                ])
+                if not success_rate_data.empty and (wins > 0 or losses > 0):
+                    fig_sr = px.pie(success_rate_data, values='count', names='category', title='Trade Success Rate', hole=.3, color_discrete_map={'Wins':'green','Losses':'red'})
+                    fig_sr.update_layout(margin=dict(t=30, b=0, l=0, r=0), showlegend=False)
+                    self.success_rate_chart.update_figure(fig_sr)
+                else:
+                    self.success_rate_chart.update_figure(go.Figure().update_layout(title_text='Trade Success Rate (No Data)'))
+
+            # 3. Daily Volume Chart (Placeholder logic)
+            if trades_data and self.volume_chart:
+                volume_df = pd.DataFrame(trades_data)
+                if not volume_df.empty and 'timestamp' in volume_df.columns and 'amount' in volume_df.columns:
+                    volume_df['date'] = pd.to_datetime(volume_df['timestamp']).dt.date
+                    daily_volume = volume_df.groupby('date')['amount'].sum().reset_index()
+                    daily_volume = daily_volume.tail(30) # Last 30 days
+                    if not daily_volume.empty:
+                        fig_vol = px.bar(daily_volume, x='date', y='amount', title='Daily Trading Volume (USD)')
+                        fig_vol.update_layout(margin=dict(t=30, b=0, l=0, r=0))
+                        self.volume_chart.update_figure(fig_vol)
+                    else:
+                        self.volume_chart.update_figure(go.Figure().update_layout(title_text='Daily Volume (No Data)'))
+                else:
+                    self.volume_chart.update_figure(go.Figure().update_layout(title_text='Daily Volume (No Data)'))
+
+            # 4. Trade Distribution (by pair, Placeholder logic)
+            if trades_data and self.trade_distribution_chart:
+                dist_df = pd.DataFrame(trades_data)
+                if not dist_df.empty and 'pair' in dist_df.columns:
+                    pair_counts = dist_df['pair'].value_counts().reset_index()
+                    pair_counts.columns = ['pair', 'count']
+                    pair_counts = pair_counts.head(10) # Top 10 pairs
+                    if not pair_counts.empty:
+                        fig_dist = px.bar(pair_counts, x='pair', y='count', title='Trades per Pair (Top 10)')
+                        fig_dist.update_layout(margin=dict(t=30, b=0, l=0, r=0))
+                        self.trade_distribution_chart.update_figure(fig_dist)
+                    else:
+                        self.trade_distribution_chart.update_figure(go.Figure().update_layout(title_text='Trades per Pair (No Data)'))
+                else:
+                     self.trade_distribution_chart.update_figure(go.Figure().update_layout(title_text='Trades per Pair (No Data)'))
             
-            # Update price chart if token is selected
-            if self.selected_token:
-                self.update_price_chart('4h')
-                
-            # Update technical indicators
-            self.update_technical_indicators()
-            
+            # TODO: Trade Time Distribution (self.trade_time_distribution)
+            # This would require grouping trades by hour of day or day of week.
+
         except Exception as e:
-            logger.error(f"Error updating market analysis: {str(e)}")
-            self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - Market analysis update error: {str(e)}")
-    
+            logger.error(f"Error updating trading activity: {e}", exc_info=True)
+            self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - Trading Activity Update Error: {e}")
+            if self.error_log_area:
+                self.error_log_area.push(f"ERROR: Trading activity update failed - {e}")
+
+    async def update_market_analysis(self):
+        """Updates the market analysis panel."""
+        try:
+            # 1. Market Condition Indicator (Placeholder)
+            # This needs a more sophisticated logic or external data source in the future.
+            # For now, a simple placeholder based on overall recent performance or a mock value.
+            market_sentiment = "Neutral" # Default
+            if self.performance_monitor and self.performance_monitor.history:
+                # Simple check: if portfolio value increased in last hour, consider Bullish, else Bearish
+                # This is a very naive indicator.
+                now = time.time()
+                one_hour_ago = now - 3600
+                recent_values = [h['value'] for h in self.performance_monitor.history if h['timestamp'] > one_hour_ago]
+                if len(recent_values) > 1 and recent_values[-1] > recent_values[0]:
+                    market_sentiment = "Bullish"
+                elif len(recent_values) > 1 and recent_values[-1] < recent_values[0]:
+                    market_sentiment = "Bearish"
+            
+            if self.market_condition_indicator and self.market_condition_label:
+                if market_sentiment == "Bullish":
+                    self.market_condition_indicator.name = 'trending_up'
+                    self.market_condition_indicator.props(add='color=green', remove='color=red color=gray')
+                    self.market_condition_label.set_text("Bullish")
+                elif market_sentiment == "Bearish":
+                    self.market_condition_indicator.name = 'trending_down'
+                    self.market_condition_indicator.props(add='color=red', remove='color=green color=gray')
+                    self.market_condition_label.set_text("Bearish")
+                else:
+                    self.market_condition_indicator.name = 'trending_flat'
+                    self.market_condition_indicator.props(add='color=gray', remove='color=green color=red')
+                    self.market_condition_label.set_text("Neutral")
+
+            # 2. Trading Opportunities (Watchlist - Placeholder)
+            # This should come from DexBot's analysis or a dedicated watchlist feature.
+            # For now, mock data.
+            mock_opportunities = [
+                {'token': 'SOL/USDC', 'score': '0.85', 'action': ui.button('Analyze', on_click=lambda: ui.notify('Analyzing SOL/USDC'))},
+                {'token': 'BONK/USDC', 'score': '0.72', 'action': ui.button('Analyze', on_click=lambda: ui.notify('Analyzing BONK/USDC'))},
+                {'token': 'WIF/USDC', 'score': '0.65', 'action': ui.button('Analyze', on_click=lambda: ui.notify('Analyzing WIF/USDC'))}
+            ]
+            if self.watchlist_table:
+                self.watchlist_table.rows = mock_opportunities
+
+            # Populate token selector for price chart (if not already populated)
+            # This could be from a predefined list in Config or dynamically from market data
+            if self.price_chart_token_selector and not self.price_chart_token_selector.options:
+                # Example: Use a few common tokens or top market cap tokens from config
+                # For a real app, this list should be managed better, perhaps from discovered pairs
+                # or a user-defined watchlist.
+                common_tokens = Config.COMMON_TRADING_PAIRS if hasattr(Config, 'COMMON_TRADING_PAIRS') else ['SOL-USDC', 'BTC-USDC', 'ETH-USDC']
+                token_options = {t.split('-')[0]: t for t in common_tokens} # Display SOL, store SOL-USDC
+                self.price_chart_token_selector.options = token_options
+                if common_tokens and not self.selected_token:
+                     self.selected_token = common_tokens[0] # Default to first token
+                     self.price_chart_token_selector.value = self.selected_token
+
+            # 3. Price Chart for Selected Asset (self.selected_token holds the pair string like 'SOL-USDC')
+            # The actual chart update is handled by self.update_price_chart(timeframe) and self.update_technical_indicators()
+            # which are called on token selection or timeframe button clicks.
+            # Here, we can trigger an initial update if a token is selected.
+            if self.selected_token:
+                await self.update_price_chart() # Update with default timeframe
+                await self.update_technical_indicators() # Update indicators for the selected token
+            else:
+                if self.price_chart:
+                    self.price_chart.update_figure(go.Figure().update_layout(title_text='Select a token to view chart'))
+                if self.rsi_chart:
+                    self.rsi_chart.update_figure(go.Figure().update_layout(title_text='RSI (Select Token)'))
+                # Clear other indicator charts too if needed
+
+        except Exception as e:
+            logger.error(f"Error updating market analysis: {e}", exc_info=True)
+            self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - Market Analysis Update Error: {e}")
+            if self.error_log_area:
+                self.error_log_area.push(f"ERROR: Market analysis update failed - {e}")
+
     def update_control_center(self):
         """Update control center data."""
         try:
@@ -568,7 +742,7 @@ class NumerusXDashboard:
                 self.toggle_btn.props('color=green icon=play_arrow')
             
             # Update risk level slider value if it changed in Config
-            self.risk_slider.value = Config.TRADE_THRESHOLD
+            self.risk_slider.value = self.config.TRADE_CONFIDENCE_THRESHOLD
             
             # Update estimated fee for manual trade (if tokens are selected)
             if hasattr(self, 'input_token') and hasattr(self, 'output_token') and hasattr(self, 'trade_amount'):
@@ -587,7 +761,8 @@ class NumerusXDashboard:
             uptime_seconds = time.time() - self.start_time
             hours, remainder = divmod(int(uptime_seconds), 3600)
             minutes, seconds = divmod(remainder, 60)
-            self.uptime_label.text = f"{hours}h {minutes}m {seconds}s"
+            if hasattr(self, 'uptime_label') and self.uptime_label:
+                self.uptime_label.text = f"{hours}h {minutes}m {seconds}s"
             self.system_metrics['uptime'] = uptime_seconds
             
             # Update CPU and memory usage
@@ -598,28 +773,42 @@ class NumerusXDashboard:
             self.system_metrics['memory'].append((time.time(), memory_usage))
             
             # Update API latency (placeholder - should be actual API call timing)
-            api_latency = 50 + 20 * (0.5 - (0.5 * (time.time() % 10) / 10))  # Simulated value
-            self.system_metrics['api_latency'].append((time.time(), api_latency))
+            # Simulating some random fluctuation for a more dynamic chart
+            simulated_latency = random.uniform(30, 200) 
+            self.system_metrics['api_latency'].append((time.time(), simulated_latency))
             
-            # Update component status indicators
-            engine_ok = True  # Placeholder - should check actual component status
-            market_api_ok = True
-            db_ok = True
+            # Update component status indicators (Simulated)
+            # In a real app, these would involve actual health checks.
+            engine_ok = self.bot.active # Simple check if bot claims to be active
+            market_api_ok = True # Placeholder: Assume MarketDataProvider is okay if no recent errors specific to it
+            db_ok = True # Placeholder: Assume DB is okay if no recent errors specific to it
             
-            self.engine_status.props(f'color={"green" if engine_ok else "red"}')
-            self.market_api_status.props(f'color={"green" if market_api_ok else "red"}')
-            self.db_status.props(f'color={"green" if db_ok else "red"}')
+            if hasattr(self, 'engine_status') and self.engine_status:
+                self.engine_status.name = 'check_circle' if engine_ok else 'error'
+                self.engine_status.props(f'color={"green" if engine_ok else "red"}')
             
-            # Update resource charts
+            if hasattr(self, 'market_api_status') and self.market_api_status:
+                self.market_api_status.name = 'check_circle' if market_api_ok else 'error'
+                self.market_api_status.props(f'color={"green" if market_api_ok else "red"}')
+
+            if hasattr(self, 'db_status') and self.db_status:
+                self.db_status.name = 'check_circle' if db_ok else 'error'
+                self.db_status.props(f'color={"green" if db_ok else "red"}')
+            
+            # Update resource charts (CPU, Memory, API Latency)
             self.update_resource_charts()
             
-            # Update error log
-            for error in self.error_log:
-                self.error_log_area.push(error)
+            # Error log is populated as errors occur. No need to re-push here.
+            # If self.error_log_area needs to be synced with self.error_log for some reason
+            # (e.g. if messages could be added to self.error_log by other means),
+            # a more sophisticated sync would be needed instead of re-pushing all.
             
         except Exception as e:
-            logger.error(f"Error updating system metrics: {str(e)}")
-            self.error_log_area.push(f"ERROR: System metrics update failed: {str(e)}")
+            logger.error(f"Error updating system metrics: {e}", exc_info=True) # Log to main logger
+            # Avoid pushing to self.error_log_area from here if it might cause loops or duplicate an existing error log push
+            # self.error_log.append(f"{datetime.now().strftime('%H:%M:%S')} - System Metrics Update Error: {e}")
+            # if hasattr(self, 'error_log_area') and self.error_log_area:
+            #    self.error_log_area.push(f"ERROR: System metrics update failed - {e}")
     
     def update_historical_data(self):
         """Update historical data for charts (runs less frequently)."""
@@ -659,10 +848,37 @@ class NumerusXDashboard:
     
     def update_risk_level(self):
         """Update risk level based on slider value."""
-        Config.TRADE_THRESHOLD = self.risk_slider.value
-        self.error_log_area.push(f"INFO: Risk level updated to {Config.TRADE_THRESHOLD:.2f}")
-        ui.notify(f'Risk level updated to {Config.TRADE_THRESHOLD:.2f}')
-    
+        new_threshold = self.risk_slider.value
+        if self.config.TRADE_CONFIDENCE_THRESHOLD != new_threshold:
+            self.config.TRADE_CONFIDENCE_THRESHOLD = new_threshold
+            self.error_log_area.push(f"INFO: Trade Confidence Threshold updated to {self.config.TRADE_CONFIDENCE_THRESHOLD:.2f}")
+            ui.notify(f'Trade Confidence Threshold updated to {self.config.TRADE_CONFIDENCE_THRESHOLD:.2f}')
+
+    def update_slippage_tolerance(self, event):
+        """Update slippage tolerance based on slider value."""
+        new_slippage_percent = event.value
+        new_slippage_bps = int(new_slippage_percent * 100)
+        if self.config.SLIPPAGE_BPS != new_slippage_bps:
+            self.config.SLIPPAGE_BPS = new_slippage_bps
+            self.current_slippage_display = f"Current: {new_slippage_percent:.2f}% ({new_slippage_bps} BPS)"
+            self.error_log_area.push(f"INFO: Slippage Tolerance updated to {new_slippage_percent:.2f}% ({new_slippage_bps} BPS)")
+            ui.notify(f'Slippage Tolerance updated to {new_slippage_percent:.2f}% ({new_slippage_bps} BPS)')
+
+    def update_config_value(self, config_key: str, new_value: Any, value_type: type):
+        """Dynamically update a Config attribute and log it."""
+        try:
+            typed_value = value_type(new_value)
+            current_value = getattr(self.config, config_key)
+            if current_value != typed_value:
+                setattr(self.config, config_key, typed_value)
+                self.error_log_area.push(f"INFO: Config '{config_key}' updated to {typed_value}")
+                ui.notify(f"Config '{config_key}' updated to {typed_value}")
+        except ValueError:
+            ui.notify(f"Invalid value for {config_key}", type='negative')
+        except Exception as e:
+            logger.error(f"Error updating config {config_key}: {e}", exc_info=True)
+            ui.notify(f"Error updating {config_key}", type='negative')
+
     def update_strategy(self, event):
         """Update selected trading strategy."""
         strategy = event.value
@@ -727,12 +943,26 @@ class NumerusXDashboard:
         self.theme = 'dark' if event.value else 'light'
         if self.theme == 'dark':
             ui.dark_mode().enable()
+            self.error_log_area.push("INFO: Dark mode enabled.")
         else:
             ui.dark_mode().disable()
-    
+            self.error_log_area.push("INFO: Light mode enabled.")
+        ui.notify(f"{self.theme.capitalize()} mode enabled.")
+
+    def update_refresh_rate(self, event):
+        """Handles update to the UI refresh rate from the settings input."""
+        new_rate = event.value
+        if self.refresh_rate != new_rate and new_rate >= 0.5: # Add a minimum sensible rate
+            self.refresh_rate = new_rate
+            # The ui.timer for update_dashboard should ideally be restarted or its interval updated.
+            # For simplicity, we assume NiceGUI's binding might handle this, or a manual restart of the timer would be needed.
+            # If direct update is not supported, we'd manage the timer instance.
+            self.error_log_area.push(f"INFO: Dashboard refresh rate set to {self.refresh_rate}s.")
+            ui.notify(f"Dashboard refresh rate set to {self.refresh_rate}s. May require app restart for full effect on existing timers if not dynamically updated.")
+
     def reset_performance_data(self):
         """Reset performance metrics."""
-        self.performance = PerformanceMonitor()
+        self.performance_monitor = PerformanceMonitor()
         self.error_log_area.push(f"INFO: Performance data reset at {datetime.now().strftime('%H:%M:%S')}")
         ui.notify('Performance data has been reset')
     
@@ -1257,10 +1487,6 @@ class NumerusXDashboard:
         ]
         
         return opportunities
-
-# Add necessary imports for the placeholders used above
-import random
-import math
 
 async def main():
     """Main entry point for the dashboard."""

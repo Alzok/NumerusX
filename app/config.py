@@ -2,6 +2,7 @@
 import os
 from dotenv import load_dotenv
 import json
+from app.analytics_engine import AdvancedTradingStrategy # Import for default strategy name
 
 # Charger les variables d'environnement depuis .env
 load_dotenv()
@@ -110,6 +111,13 @@ class Config:
     # Configuration du Cache pour MarketData
     MARKET_DATA_CACHE_TTL_SECONDS = int(os.getenv("MARKET_DATA_CACHE_TTL_SECONDS", "60"))
     MARKET_DATA_CACHE_MAX_SIZE = int(os.getenv("MARKET_DATA_CACHE_MAX_SIZE", "1000"))
+
+    # Configuration du Moteur de Prédiction
+    PREDICTION_MODEL_DIR = os.getenv("PREDICTION_MODEL_DIR", "models")
+    PREDICTION_DATA_DIR = os.getenv("PREDICTION_DATA_DIR", "data/prediction_data")
+
+    # Configuration des Stratégies
+    DEFAULT_STRATEGY_NAME = os.getenv("DEFAULT_STRATEGY_NAME", AdvancedTradingStrategy().get_name()) # Default to AdvancedTradingStrategy
 
     # Chemins et Logs
     LOG_DIR = os.getenv("LOG_DIR", "logs")

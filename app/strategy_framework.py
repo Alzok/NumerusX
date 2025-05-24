@@ -2099,3 +2099,29 @@ class StrategyOptimizer:
                 mutated[param] = np.random.uniform(range_min, range_max)
                 
         return mutated
+
+class BaseStrategy:
+    """Abstract base class for all trading strategies."""
+    
+    def analyze(self, market_data: pd.DataFrame, **kwargs) -> dict:
+        """Analyzes market data and returns analysis results."""
+        raise NotImplementedError
+        
+    def generate_signal(self, analysis: dict, **kwargs) -> dict:
+        """Generates trading signal from analysis.
+
+        Returns:
+            dict: e.g., {'signal': 'buy'/'sell'/'hold', 'confidence': 0.75, 'target_price': 105.0, 'stop_loss': 95.0}
+                  Signal should be one of 'buy', 'sell', or 'hold'.
+                  Confidence is a float between 0 and 1.
+                  target_price and stop_loss are optional.
+        """
+        raise NotImplementedError
+        
+    def get_parameters(self) -> dict:
+        """Returns strategy parameters."""
+        raise NotImplementedError
+
+    def get_name(self) -> str:
+        """Returns the name of the strategy."""
+        return self.__class__.__name__

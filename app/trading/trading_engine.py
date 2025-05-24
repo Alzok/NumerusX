@@ -11,6 +11,7 @@ from solders.fee_calculator import FeeCalculator
 import base58
 import os
 import json
+import aiohttp
 
 from app.market.market_data import MarketDataProvider
 from app.config import Config
@@ -40,54 +41,130 @@ class TradingEngine:
     def _initialize_wallet(self, wallet_path: str) -> Keypair:
         """
         Initialise le portefeuille de manière sécurisée avec validation.
+        Tente de charger depuis wallet_path, puis Config.BACKUP_WALLET_PATH, 
+        puis Config.SOLANA_PRIVATE_KEY_BS58 (variable d'environnement).
         
         Args:
-            wallet_path: Chemin vers le fichier de clé du portefeuille
+            wallet_path: Chemin principal vers le fichier de clé du portefeuille.
             
         Returns:
-            Instance Keypair pour le portefeuille
+            Instance Keypair pour le portefeuille.
+            
+        Raises:
+            ValueError: Si aucune méthode de chargement de portefeuille ne réussit.
         """
+        primary_error = None
+        # Attempt 1: Load from primary wallet_path
         try:
+            logger.info(f"Attempting to load wallet from primary path: {wallet_path}")
             if not os.path.exists(wallet_path):
-                raise FileNotFoundError(f"Fichier de portefeuille non trouvé: {wallet_path}")
-                
+                raise FileNotFoundError(f"Primary wallet file not found: {wallet_path}")
+            
             with open(wallet_path, 'r') as f:
-                try:
-                    # Essayer de charger comme JSON (format Solana CLI)
+                try: # JSON format (Solana CLI)
                     key_data = json.load(f)
                     if isinstance(key_data, list):
-                        private_key = bytes(key_data)
+                        private_key_bytes = bytes(key_data)
                     else:
-                        raise ValueError("Format de clé non reconnu")
-                except json.JSONDecodeError:
-                    # Essayer de charger comme Base58 (format .key)
+                        raise ValueError("Unrecognized key format in JSON file")
+                except json.JSONDecodeError: # Try raw base58
+                    f.seek(0) # Reset file pointer after failed json.load
                     content = f.read().strip()
                     try:
-                        private_key = base58.b58decode(content)
-                    except Exception:
-                        raise ValueError("Format de clé non reconnu")
+                        private_key_bytes = base58.b58decode(content)
+                    except Exception as b58_e:
+                        raise ValueError(f"Not a valid JSON or Base58 key file: {b58_e}")
             
-            # Vérifier que la longueur de la clé est correcte
-            if len(private_key) != 64:
-                raise ValueError(f"Clé privée invalide: longueur {len(private_key)}, attendue 64")
-                
-            keypair = Keypair.from_bytes(private_key)
-            logger.info(f"Portefeuille initialisé avec succès. Adresse: {keypair.pubkey()}")
+            if len(private_key_bytes) != 64: # Solana private keys are typically 32 bytes, Keypair expects 64 (seed)
+                                          # Keypair.from_secret_key expects 32 bytes or 64 for seed.
+                                          # Solana CLI JSON is usually a list of 64 numbers (uint8 array for seed).
+                                          # Raw base58 key is usually the 32-byte secret key.
+                                          # Keypair.from_bytes() expects 64 bytes (private key + public key, or seed)
+                                          # Let's clarify based on typical usage.
+                                          # If it's a 32-byte secret, use Keypair.from_secret_key.
+                                          # If it's from Solana CLI JSON (often 64 bytes), Keypair.from_seed_phrase_and_passphrase or from_seed may apply if it's a seed.
+                                          # For now, assuming the loaded `private_key_bytes` are the 64-byte representation expected by Keypair.from_bytes or a 32-byte secret key.
+                # If we have 32 bytes, it's likely the secret key part. Keypair.from_secret_key() handles this.
+                # If we have 64 bytes from JSON, it's usually the full keypair bytes [secret_key (32) + public_key (32)] or a seed (64).
+                # Keypair.from_bytes expects 64 bytes which are [secret_key (32 bytes) + public_key (32 bytes)].
+                # Or it could be a 64-byte seed. For Solana CLI json, it's usually the 64-byte array representing the keypair.
+
+                # Let's assume if it's 64 bytes it's the full keypair data as bytes
+                # If it's 32 bytes it's the secret_key component
+                if len(private_key_bytes) == 32: # This would be a raw secret key
+                    keypair = Keypair.from_secret_key(private_key_bytes)
+                elif len(private_key_bytes) == 64: # This could be seed or [secret+public]
+                    # Solana CLI JSON format is typically the 64-byte array [secret_key + public_key]
+                    # Keypair.from_bytes can take this.
+                    keypair = Keypair.from_bytes(private_key_bytes) # This is likely if loading from JSON array of 64 numbers
+                else:
+                    raise ValueError(f"Invalid private key length: {len(private_key_bytes)}, expected 32 or 64 bytes")
+
+            logger.info(f"Wallet initialized successfully from {wallet_path}. Address: {keypair.pubkey()}")
             return keypair
-            
         except Exception as e:
-            logger.error(f"Échec de l'initialisation du portefeuille: {e}")
-            # Implémenter une stratégie de repli - par exemple, utiliser une clé de secours
+            logger.error(f"Failed to initialize wallet from primary path {wallet_path}: {e}")
+            primary_error = e
+
+        # Attempt 2: Load from backup wallet_path if primary failed
+        if Config.BACKUP_WALLET_PATH:
             try:
-                # Essayer d'utiliser un fichier de clé de secours ou une variable d'environnement
-                backup_wallet_path = Config.BACKUP_WALLET_PATH
-                if backup_wallet_path and os.path.exists(backup_wallet_path):
-                    logger.warning(f"Utilisation du portefeuille de secours: {backup_wallet_path}")
-                    return self._initialize_wallet(backup_wallet_path)
+                logger.warning(f"Attempting to load wallet from backup path: {Config.BACKUP_WALLET_PATH}")
+                if not os.path.exists(Config.BACKUP_WALLET_PATH):
+                    raise FileNotFoundError(f"Backup wallet file not found: {Config.BACKUP_WALLET_PATH}")
+                
+                with open(Config.BACKUP_WALLET_PATH, 'r') as f:
+                    try: # JSON format
+                        key_data = json.load(f)
+                        if isinstance(key_data, list):
+                            private_key_bytes = bytes(key_data)
+                        else: raise ValueError("Unrecognized key format in backup JSON")
+                    except json.JSONDecodeError: # Raw base58
+                        f.seek(0)
+                        content = f.read().strip()
+                        try: private_key_bytes = base58.b58decode(content)
+                        except Exception as b58_e: raise ValueError(f"Backup not valid JSON or B58: {b58_e}")
+
+                if len(private_key_bytes) == 32:
+                    keypair = Keypair.from_secret_key(private_key_bytes)
+                elif len(private_key_bytes) == 64:
+                    keypair = Keypair.from_bytes(private_key_bytes)
+                else:
+                    raise ValueError(f"Invalid backup private key length: {len(private_key_bytes)}")
+                
+                logger.info(f"Wallet initialized successfully from backup {Config.BACKUP_WALLET_PATH}. Address: {keypair.pubkey()}")
+                return keypair
             except Exception as backup_e:
-                logger.critical(f"Échec également avec le portefeuille de secours: {backup_e}")
-            
-            raise ValueError(f"Impossible d'initialiser le portefeuille: {e}")
+                logger.error(f"Failed to initialize wallet from backup path {Config.BACKUP_WALLET_PATH}: {backup_e}")
+        else:
+            logger.info("No backup wallet path configured.")
+
+        # Attempt 3: Load from environment variable (SOLANA_PRIVATE_KEY_BS58)
+        if Config.SOLANA_PRIVATE_KEY_BS58:
+            try:
+                logger.warning("Attempting to load wallet from SOLANA_PRIVATE_KEY_BS58 environment variable.")
+                private_key_bs58 = Config.SOLANA_PRIVATE_KEY_BS58
+                private_key_bytes = base58.b58decode(private_key_bs58)
+                
+                # Solana private keys are 32 bytes. Keypair.from_secret_key takes these 32 bytes.
+                if len(private_key_bytes) != 32: 
+                    raise ValueError(f"Invalid private key length from env var: {len(private_key_bytes)}, expected 32 bytes for a Base58 secret key string.")
+                
+                keypair = Keypair.from_secret_key(private_key_bytes)
+                logger.info(f"Wallet initialized successfully from SOLANA_PRIVATE_KEY_BS58. Address: {keypair.pubkey()}")
+                return keypair
+            except Exception as env_e:
+                logger.error(f"Failed to initialize wallet from SOLANA_PRIVATE_KEY_BS58: {env_e}")
+        else:
+            logger.info("No SOLANA_PRIVATE_KEY_BS58 environment variable configured.")
+
+        # If all attempts fail, raise a comprehensive error
+        final_error_message = "All wallet initialization methods failed."
+        if primary_error:
+            final_error_message += f" Primary error: {str(primary_error)}."
+        # Could add details about backup/env errors too if needed, but might be too verbose.
+        logger.critical(final_error_message)
+        raise ValueError(final_error_message)
             
     async def __aenter__(self):
         """Initialise les ressources asynchrones."""
@@ -136,61 +213,145 @@ class TradingEngine:
             # Valeur par défaut sécuritaire
             return Config.DEFAULT_FEE_PER_SIGNATURE_LAMPORTS * len(transaction.signatures)
             
-    async def execute_swap(self, input_token: str, output_token: str, 
-                          amount_in: float, slippage_bps: Optional[int] = None) -> Dict[str, Any]:
+    async def execute_swap(self, input_token_mint: str, output_token_mint: str, 
+                           amount_in_usd: Optional[float] = None, 
+                           amount_in_tokens: Optional[float] = None, 
+                           slippage_bps: Optional[int] = None) -> Dict[str, Any]:
         """
-        Exécute un swap entre deux tokens avec estimation des frais.
+        Exécute un swap entre deux tokens.
+        Prioritise amount_in_tokens si fourni, sinon calcule à partir de amount_in_usd.
         
         Args:
-            input_token: Adresse du token d'entrée
-            output_token: Adresse du token de sortie
-            amount_in: Montant à échanger
+            input_token_mint: Adresse du token d'entrée (e.g., USDC mint address).
+            output_token_mint: Adresse du token de sortie.
+            amount_in_usd: Montant à échanger, exprimé en USD. Sera converti en montant de token d'entrée.
+            amount_in_tokens: Montant du token d'entrée à échanger. Prioritaire sur amount_in_usd.
             slippage_bps: Tolérance de slippage en points de base (BPS). Utilise Config.SLIPPAGE_BPS par défaut.
             
         Returns:
-            Résultat de la transaction
+            Dictionnaire structuré: {'success': True/False, 'data': ..., 'error': ...}
         """
         current_slippage_bps = slippage_bps if slippage_bps is not None else Config.SLIPPAGE_BPS
-        logger.info(f"Executing swap with slippage: {current_slippage_bps} BPS")
+
+        if amount_in_tokens is None and amount_in_usd is None:
+            return {'success': False, 'error': "amount_in_tokens ou amount_in_usd doit être fourni.", 'data': None}
+        
+        if amount_in_tokens is not None and amount_in_tokens <= 0:
+            return {'success': False, 'error': "amount_in_tokens doit être positif.", 'data': None}
+        if amount_in_usd is not None and amount_in_usd <= 0:
+             return {'success': False, 'error': "amount_in_usd doit être positif.", 'data': None}
+
+        final_amount_in_tokens: float
+
+        if amount_in_tokens is not None:
+            final_amount_in_tokens = amount_in_tokens
+            logger.info(f"Initiating swap: {final_amount_in_tokens} {input_token_mint} -> {output_token_mint} with slippage: {current_slippage_bps} BPS (using provided token amount)")
+        elif amount_in_usd is not None:
+            if not self.market_data_provider:
+                return {'success': False, 'error': "MarketDataProvider non initialisé pour convertir USD en tokens.", 'data': None}
+            
+            # Obtenir le prix du token d'entrée pour calculer le montant en tokens
+            price_response = await self.market_data_provider.get_token_price(input_token_mint)
+            if not price_response['success'] or price_response['data'] is None or price_response['data'] <= 0:
+                error_msg = f"Impossible d'obtenir le prix pour {input_token_mint} afin de convertir USD. Erreur: {price_response.get('error', 'Prix non disponible ou invalide')}"
+                logger.error(error_msg)
+                return {'success': False, 'error': error_msg, 'data': None}
+            
+            input_token_price_usd = price_response['data']
+            final_amount_in_tokens = amount_in_usd / input_token_price_usd
+            logger.info(f"Initiating swap: {amount_in_usd:.2f} USD ({final_amount_in_tokens:.6f} {input_token_mint} @ ${input_token_price_usd:.6f}/token) -> {output_token_mint} with slippage: {current_slippage_bps} BPS")
+        else:
+            # This case should be caught by the initial check, but as a safeguard:
+            return {'success': False, 'error': "Logique de montant invalide.", 'data': None}
 
         try:
-            # Obtenir les meilleures routes pour le swap
-            routes = await self._get_swap_routes(input_token, output_token, amount_in, current_slippage_bps)
+            # _get_swap_routes prend le montant en tokens du token d'entrée
+            routes_response = await self._get_swap_routes(input_token_mint, output_token_mint, final_amount_in_tokens, current_slippage_bps)
             
-            # Sélectionner la meilleure route en tenant compte du prix et des frais
-            best_route = await self._select_best_quote(routes, amount_in)
+            if not routes_response['success']:
+                error_msg = f"Failed to get swap routes: {routes_response.get('error', 'Unknown error from _get_swap_routes')}"
+                logger.error(error_msg)
+                return {'success': False, 'error': error_msg, 'data': routes_response.get('data')} # Pass along partial data like the quote response itself
+
+            routes = routes_response['data'] # This is now a list containing one route object from Jupiter /quote
+            if not routes or not isinstance(routes, list) or len(routes) == 0:
+                error_msg = f"No routes found in successful response from _get_swap_routes. Data: {routes}"
+                logger.error(error_msg)
+                return {'success': False, 'error': error_msg, 'data': None}
+
+            # _select_best_quote expects a list of routes. Jupiter /quote gives one best route.
+            # Our _get_swap_routes wraps it in a list.
+            best_route = await self._select_best_quote(routes, final_amount_in_tokens) # _select_best_quote raises ValueError if no viable route
             
-            # Estimer les frais avant d'exécuter
-            transaction_data = await self._build_swap_transaction(best_route)
-            transaction = Transaction.deserialize(transaction_data["transaction"])
+            # Construire la transaction de swap
+            # This will be updated to return a structured response in the next step
+            build_tx_response = await self._build_swap_transaction(best_route)
+            # TODO: Adapt to structured response from _build_swap_transaction once implemented
+            # For now, assume it returns transaction_bytes directly or raises an error.
+            # transaction_bytes = build_tx_response['data']["serialized_transaction"]
+            # transaction = Transaction.deserialize(transaction_bytes)
+            
+            # Placeholder for _build_swap_transaction structure until it's refactored
+            if not build_tx_response or not build_tx_response.get("swapTransaction"):
+                 error_msg = f"Failed to build swap transaction or invalid response: {build_tx_response}"
+                 logger.error(error_msg)
+                 return {'success': False, 'error': error_msg, 'data': build_tx_response}
+            
+            transaction_bytes_b64 = build_tx_response["swapTransaction"]
+            transaction_bytes = base58.b58decode(transaction_bytes_b64) # Jupiter returns base64 encoded string
+            transaction = Transaction.deserialize(transaction_bytes)
             
             estimated_fee = await self.get_fee_for_message(transaction)
-            logger.info(f"Frais estimés pour cette transaction: {estimated_fee / 1_000_000_000:.6f} SOL")
+            logger.info(f"Estimated fee for this transaction: {estimated_fee / 1_000_000_000:.6f} SOL")
             
             # Exécuter la transaction
-            result = await self._execute_transaction(transaction)
+            # This will be updated to return a structured response in the next step
+            exec_tx_response = await self._execute_transaction(transaction_bytes_b64, build_tx_response.get("last_valid_block_height", 0))
+            # TODO: Adapt to structured response from _execute_transaction once implemented
             
-            # Enregistrer l'historique
-            self._record_transaction(result, {
-                "input_token": input_token,
-                "output_token": output_token,
-                "amount_in": amount_in,
-                "route": best_route["market"],
-                "expected_amount_out": best_route["outAmount"],
-                "fee": estimated_fee
-            })
+            # Placeholder for _execute_transaction structure until it's refactored
+            if not exec_tx_response or not exec_tx_response.get("signature"): # Assuming simple dict with signature
+                error_msg = f"Swap execution failed or invalid response: {exec_tx_response}"
+                logger.error(error_msg)
+                # Propagate the error if exec_tx_response itself is a structured error from a future refactor
+                if isinstance(exec_tx_response, dict) and 'success' in exec_tx_response and not exec_tx_response['success']:
+                    return exec_tx_response
+                return {'success': False, 'error': error_msg, 'data': exec_tx_response}
             
-            return result
+            # Assuming exec_tx_response on success is like: {'signature': str, 'confirmation': ...}
+            # For now, let's make it a structured success
+            final_success_data = {
+                'signature': exec_tx_response.get("signature"),
+                'confirmation_details': exec_tx_response.get("confirmation_status"),
+                'input_token': input_token_mint,
+                'output_token': output_token_mint,
+                'amount_in': final_amount_in_tokens,
+                'route_info': best_route,
+                'expected_amount_out': best_route.get("outAmount"),
+                'fee_lamports': estimated_fee,
+                'slippage_bps': current_slippage_bps
+            }
+            self._record_transaction(exec_tx_response, final_success_data) # _record_transaction needs to be adapted
             
+            return {'success': True, 'data': final_success_data, 'error': None}
+            
+        except ValueError as ve: # Catch specific errors like from _select_best_quote
+            logger.error(f"Swap execution failed due to ValueError: {str(ve)}", exc_info=True)
+            return {'success': False, 'error': f"ValueError: {str(ve)}", 'data': None}
         except Exception as e:
-            logger.error(f"Échec de l'exécution du swap: {e}")
-            # Essayer un chemin d'exécution alternatif
+            logger.error(f"Generic swap execution failed: {str(e)}", exc_info=True)
             try:
-                logger.warning("Tentative d'exécution sur une route alternative...")
-                return await self._execute_fallback_swap(input_token, output_token, amount_in, current_slippage_bps)
+                logger.warning("Attempting fallback swap mechanism...")
+                # Ensure _execute_fallback_swap also returns a structured response
+                fallback_result = await self._execute_fallback_swap(input_token_mint, output_token_mint, final_amount_in_tokens, current_slippage_bps)
+                if fallback_result['success']:
+                    logger.info("Fallback swap successful.")
+                else:
+                    logger.error(f"Fallback swap also failed: {fallback_result.get('error')}")
+                return fallback_result
             except Exception as fallback_e:
-                logger.error(f"Échec également de la route alternative: {fallback_e}")
-                raise Exception(f"Impossible d'exécuter le swap: {e}")
+                logger.critical(f"Fallback swap mechanism itself failed: {fallback_e}", exc_info=True)
+                return {'success': False, 'error': f"Primary swap failed ({type(e).__name__}): {str(e)}. Fallback failed ({type(fallback_e).__name__}): {str(fallback_e)}", 'data': None}
                 
     async def _select_best_quote(self, routes: List[Dict[str, Any]], amount_in: float) -> Dict[str, Any]:
         """
@@ -239,45 +400,271 @@ class TradingEngine:
             
         return best_route
         
-    async def _get_swap_routes(self, input_token: str, output_token: str, amount_in: float, slippage_bps: int) -> List[Dict[str, Any]]:
-        """Obtient les routes possibles pour un swap."""
-        # Implémentation pour obtenir les routes de swap
-        # Cette méthode devrait utiliser market_data_provider et passer slippage_bps à l'API Jupiter
+    async def _get_swap_routes(self, input_token_mint: str, output_token_mint: str, amount_in_tokens: float, slippage_bps: int) -> Dict[str, Any]:
+        """
+        Récupère les routes de swap de Jupiter.
+        Args:
+            input_token_mint: Adresse du token d'entrée.
+            output_token_mint: Adresse du token de sortie.
+            amount_in_tokens: Montant du token d'entrée à échanger (pas en USD).
+            slippage_bps: Slippage en BPS.
+        Returns:
+            Réponse structurée de l'API Jupiter /quote.
+        """
         if not self.market_data_provider:
-            logger.error("MarketDataProvider non initialisé.")
-            return []
-        
-        # Convertir amount_in en unitée la plus petite du token (lamports pour SOL, etc.)
-        # Ceci dépendra de la décimale du input_token. Pour l'instant, supposons que amount_in est déjà dans la bonne unité pour l'API.
-        # Ou que market_data_provider gère la conversion.
+             # Should not happen if TradingEngine is used via async with
+            logger.error("MarketDataProvider not available in _get_swap_routes")
+            return {'success': False, 'error': 'MarketDataProvider not available', 'data': None}
 
-        # Exemple d'appel (à adapter avec la vraie méthode de market_data_provider):
-        # routes = await self.market_data_provider.get_jupiter_quotes(
-        #     input_token, output_token, amount_in, slippage_bps
-        # )
-        # return routes
-        logger.warning("_get_swap_routes: Implementation placeholder. Needs to call MarketDataProvider with slippage_bps.")
-        pass
+        # Obtenir les décimales du token d'entrée pour calculer amount_lamports
+        token_info_response = await self.market_data_provider.get_token_info(input_token_mint)
+        if not token_info_response['success'] or not token_info_response['data'] or 'decimals' not in token_info_response['data']:
+            error_msg = f"Impossible d'obtenir les décimales pour {input_token_mint}. Erreur: {token_info_response.get('error', 'Informations sur le token non disponibles')}"
+            logger.error(error_msg)
+            return {'success': False, 'error': error_msg, 'data': None}
         
+        input_decimals = token_info_response['data']['decimals']
+        amount_lamports = int(amount_in_tokens * (10**input_decimals))
+
+        logger.debug(f"Fetching swap routes for: {amount_in_tokens} ({amount_lamports} lamports) of {input_token_mint} to {output_token_mint}, slippage: {slippage_bps} BPS")
+
+        # Appel à MarketDataProvider pour obtenir la quote de Jupiter
+        # MarketDataProvider.get_jupiter_swap_quote gère la construction de l'URL et l'appel API
+        quote_response = await self.market_data_provider.get_jupiter_swap_quote(
+            input_mint=input_token_mint,
+            output_mint=output_token_mint,
+            amount_lamports=amount_lamports, # amount is in lamports
+            slippage_bps=slippage_bps
+        )
+
+        if not quote_response['success']:
+            logger.error(f"Échec de l'obtention de la quote Jupiter: {quote_response.get('error', 'Erreur inconnue')}")
+            return {
+                'success': False, 
+                'error': f"Jupiter quote API error: {quote_response.get('error', 'Erreur inconnue')}", 
+                'data': quote_response.get('data') # Pass along the raw response from Jupiter if available
+            }
+        
+        # La réponse de get_jupiter_swap_quote contient déjà la structure de données de la route Jupiter
+        # On l'enveloppe dans une liste car _select_best_quote s'attendait historiquement à une liste de routes.
+        # Jupiter v6 /quote API retourne directement la meilleure route, donc on a une liste d'un élément.
+        # Ensure routes_response['data'] is not None before wrapping in a list
+        if quote_response['data'] is None:
+            logger.error("Aucune donnée de route reçue de Jupiter malgré une réponse réussie.")
+            return {'success': False, 'error': 'No route data from Jupiter despite success response', 'data': None}
+
+        return {
+            'success': True, 
+            'data': [quote_response['data']], # Wrap the single Jupiter quote in a list
+            'error': None
+        }
+
     async def _build_swap_transaction(self, route: Dict[str, Any]) -> Dict[str, Any]:
-        """Construit une transaction de swap basée sur la route sélectionnée."""
-        # Implémentation pour construire une transaction
-        pass
+        """
+        Construit la transaction de swap en utilisant l'API /swap de Jupiter.
+        Args:
+            route: La route de swap obtenue de l'API /quote (quoteResponse).
+        Returns:
+            Dictionnaire structuré: {'success': True/False, 'data': {'serialized_transaction_b64': str, 'last_valid_block_height': int}, 'error': 'message'}
+        """
+        logger.info(f"Building swap transaction for quote: {route.get('inputMint')}->{route.get('outputMint')}, outAmount: {route.get('outAmount')}")
+        if not self.wallet:
+            logger.error("Wallet not initialized for _build_swap_transaction.")
+            return {'success': False, 'error': "Wallet not initialized", 'data': None}
+
+        swap_api_url = Config.JUPITER_SWAP_URL
         
-    async def _execute_transaction(self, transaction: Transaction) -> Dict[str, Any]:
-        """Exécute une transaction Solana."""
-        # Implémentation pour exécuter une transaction
-        pass
+        payload = {
+            "userPublicKey": str(self.wallet.pubkey()),
+            "wrapAndUnwrapSol": True, # Default, can be configurable
+            "quoteResponse": route, 
+            "asLegacyTransaction": False, # Prefer versioned transactions
+            # Optional: Add dynamicComputeUnitLimit, prioritizationFeeLamports from Config or dynamically
+            # "dynamicComputeUnitLimit": True, 
+            # "prioritizationFeeLamports": "auto" # or a specific value Config.JUPITER_PRIORITY_FEE_LAMPORTS
+        }
+        if Config.JUPITER_COMPUTE_UNIT_LIMIT_ENABLED:
+            payload["dynamicComputeUnitLimit"] = True
+        if Config.JUPITER_PRIORITY_FEE_LAMPORTS: # Can be "auto" or a number
+            payload["prioritizationFeeLamports"] = Config.JUPITER_PRIORITY_FEE_LAMPORTS
+
+
+        headers = {"Content-Type": "application/json"}
+        if Config.JUPITER_API_KEY:
+            headers["Authorization"] = f"Bearer {Config.JUPITER_API_KEY}"
+
+        # Using MarketDataProvider's session if available and open, otherwise a new one
+        session_to_use = None
+        close_session_after = False
+        if self.market_data_provider and self.market_data_provider.session and not self.market_data_provider.session.closed:
+            session_to_use = self.market_data_provider.session
+        else:
+            session_to_use = aiohttp.ClientSession()
+            close_session_after = True
+            logger.debug("Created temporary ClientSession for Jupiter /swap call.")
+
+        try:
+            await self.market_data_provider._check_rate_limit("jupiter_swap") # Assume new category for swap
+            
+            logger.debug(f"Jupiter /swap request: POST {swap_api_url}, payload: {json.dumps(payload)[:200]}...") # Log partial payload
+            async with session_to_use.post(swap_api_url, json=payload, headers=headers, timeout=Config.API_TIMEOUT_SECONDS_JUPITER_SWAP) as response:
+                response_text = await response.text()
+                if response.status == 200:
+                    try:
+                        swap_data = json.loads(response_text)
+                        # Jupiter /swap returns: { swapTransaction: "base64_encoded_transaction", lastValidBlockHeight: number }
+                        if "swapTransaction" not in swap_data or "lastValidBlockHeight" not in swap_data:
+                            err_msg = f"Jupiter Swap API response missing 'swapTransaction' or 'lastValidBlockHeight'. Response: {swap_data}"
+                            logger.error(err_msg)
+                            return {'success': False, 'error': err_msg, 'data': swap_data}
+                        
+                        logger.info(f"Successfully built swap transaction. LastValidBlockHeight: {swap_data.get('lastValidBlockHeight')}")
+                        return {
+                            'success': True, 
+                            'data': {
+                                'serialized_transaction_b64': swap_data["swapTransaction"], 
+                                'last_valid_block_height': swap_data["lastValidBlockHeight"],
+                                'raw_response': swap_data
+                            }, 
+                            'error': None
+                        }
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Jupiter Swap API JSONDecodeError. URL: {swap_api_url}. Error: {str(e)}. Response: {response_text}", exc_info=True)
+                        return {'success': False, 'error': f"JSONDecodeError: {str(e)}", 'data': {'response_text': response_text}}
+                else:
+                    error_message = f"Jupiter Swap API returned status {response.status}"
+                    try: # Try to parse error from Jupiter
+                        error_payload = json.loads(response_text)
+                        error_detail = error_payload.get('message', error_payload.get('error', response_text))
+                        if isinstance(error_detail, dict) and 'message' in error_detail: # Nested error
+                           error_detail = error_detail['message']
+                        error_message += f": {error_detail}"
+                    except json.JSONDecodeError:
+                        error_message += f": {response_text}"
+                    logger.error(f"{error_message}. URL: {swap_api_url}.") # Payload logging can be verbose, logged above partially
+                    return {'success': False, 'error': error_message, 'data': {'response_text': response_text}}
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Jupiter Swap API ClientError. URL: {swap_api_url}. Error: {str(e)}", exc_info=True)
+            return {'success': False, 'error': f"ClientError: {str(e)}", 'data': None}
+        except asyncio.TimeoutError:
+            logger.error(f"Jupiter Swap API Timeout. URL: {swap_api_url}", exc_info=True)
+            return {'success': False, 'error': "TimeoutError", 'data': None}
+        except Exception as e:
+            logger.error(f"Unexpected error in _build_swap_transaction. URL: {swap_api_url}. Error: {str(e)}", exc_info=True)
+            return {'success': False, 'error': f"UnexpectedError: {str(e)}", 'data': None}
+        finally:
+            if close_session_after and session_to_use:
+                await session_to_use.close()
+                logger.debug("Closed temporary ClientSession for Jupiter /swap call.")
+
+    async def _execute_transaction(self, serialized_transaction_b64: str, last_valid_block_height: int) -> Dict[str, Any]:
+        """
+        Signe, envoie la transaction VersionedTransaction au réseau Solana, et attend la confirmation.
+        Args:
+            serialized_transaction_b64: La transaction sérialisée en base64 obtenue de Jupiter /swap.
+            last_valid_block_height: La dernière hauteur de bloc valide pour la transaction.
+        Returns:
+            Dictionnaire structuré: {'success': True/False, 'data': {'signature': str, 'confirmation_response': ...}, 'error': 'message'}
+        """
+        if not self.wallet:
+            logger.error("Wallet not initialized for _execute_transaction.")
+            return {'success': False, 'error': "Wallet not initialized", 'data': None}
         
+        # Ensure AsyncClient is healthy
+        if not self.client or not hasattr(self.client, 'http_client') or (hasattr(self.client, 'http_client') and self.client.http_client and self.client.http_client.closed):
+            logger.warning("AsyncClient was closed or not initialized. Recreating for _execute_transaction.")
+            if hasattr(self.client, 'http_client') and self.client.http_client: # Ensure client has http_client attribute
+                 await self.client.close() 
+            self.client = AsyncClient(self.rpc_url)
+
+        try:
+            # Deserialize the VersionedTransaction
+            try:
+                tx_bytes = base58.b58decode(serialized_transaction_b64)
+                transaction = Transaction.deserialize(tx_bytes)
+            except (TypeError, ValueError) as e_b64:
+                logger.error(f"Error decoding/deserializing base64 swapTransaction: {str(e_b64)}", exc_info=True)
+                return {'success': False, 'error': f"TransactionDeserializeError: {str(e_b64)}", 'data': None}
+
+            # Sign the VersionedTransaction with our wallet
+            # Jupiter /swap endpoint returns a transaction that needs to be signed by the user.
+            transaction.sign([self.wallet]) # VersionedTransaction.sign takes a list of signers
+
+            # Send the transaction
+            logger.info(f"Sending signed VersionedTransaction to Solana network...")
+            # The `send_transaction` method of AsyncClient handles both Transaction and VersionedTransaction.
+            send_tx_resp = await self.client.send_transaction(transaction, opts=self.client.commitment_opts(skip_preflight=Config.SOLANA_SKIP_PREFLIGHT))
+            signature_obj = send_tx_resp.value 
+            signature_str = str(signature_obj)
+            logger.info(f"Transaction sent. Signature: {signature_str}")
+            self.last_transaction_signature = signature_str
+            self.transaction_history.append(signature_str) # Keep track
+
+            # Confirm the transaction
+            logger.info(f"Waiting for transaction confirmation for {signature_str} (LastValidBlockHeight: {last_valid_block_height})...")
+            
+            # Using confirm_transaction with last_valid_block_height for versioned transactions
+            confirmation_resp = await self.client.confirm_transaction(
+                signature_obj,
+                commitment=Config.SOLANA_COMMITMENT, 
+                last_valid_block_height=last_valid_block_height,
+                sleep_seconds=Config.SOLANA_CONFIRMATION_SLEEP_SECONDS 
+            )
+            
+            # confirmation_resp.value is a list of RpcResponseContext(RpcSimulateTransactionResult)
+            # We are interested in confirmation_resp.value[0].err
+            if confirmation_resp.value and confirmation_resp.value[0].err is None:
+                logger.info(f"Transaction confirmed successfully: {signature_str}")
+                return {'success': True, 'data': {'signature': signature_str, 'confirmation_status': confirmation_resp.value[0]}, 'error': None}
+            elif confirmation_resp.value and confirmation_resp.value[0].err:
+                error_detail = f"Transaction failed confirmation: {confirmation_resp.value[0].err}"
+                logger.error(f"{error_detail}. Signature: {signature_str}. Logs: {confirmation_resp.value[0].logs}")
+                return {'success': False, 'error': error_detail, 'data': {'signature': signature_str, 'confirmation_response': confirmation_resp.value[0]}}
+            else: 
+                # This case means the confirmation response itself was unusual or empty.
+                logger.error(f"Transaction confirmation unclear for {signature_str}. Raw response: {confirmation_resp}")
+                return {'success': False, 'error': "Transaction confirmation unclear or timed out waiting for block height.", 
+                        'data': {'signature': signature_str, 'raw_response': confirmation_resp.to_json() if confirmation_resp else None}}
+
+        except solana.rpc.core.RPCException as rpc_e: # Catch specific Solana RPC errors
+            logger.error(f"Solana RPCException during transaction execution: {str(rpc_e)}", exc_info=True)
+            # Try to extract more details if possible, e.g. from rpc_e.args or specific RPC error codes
+            error_message = f"Solana RPCException: {str(rpc_e)}"
+            # Example: if "BlockhashNotFound" in str(rpc_e): ...
+            return {'success': False, 'error': error_message, 'data': None}
+        except (aiohttp.ClientError, ConnectionRefusedError, aiohttp.ClientConnectorError) as conn_e:
+            error_type = type(conn_e).__name__
+            logger.error(f"Solana RPC {error_type}: {str(conn_e)}. URL: {self.rpc_url}", exc_info=True)
+            return {'success': False, 'error': f"Solana RPC {error_type}: {str(conn_e)}", 'data': None}
+        except asyncio.TimeoutError: 
+            logger.error(f"Solana RPC Timeout while executing transaction. URL: {self.rpc_url}", exc_info=True)
+            return {'success': False, 'error': "Solana RPC Timeout", 'data': None}
+        except Exception as e: 
+            error_type = type(e).__name__
+            logger.error(f"Unexpected error during Solana transaction execution ({error_type}): {str(e)}", exc_info=True)
+            return {'success': False, 'error': f"Solana transaction execution error ({error_type}): {str(e)}", 'data': None}
+
     async def _execute_fallback_swap(self, input_token: str, output_token: str, 
                                    amount_in: float, slippage_bps: int) -> Dict[str, Any]:
-        """Tente un swap avec un mécanisme de repli (ex: autre route, DEX différent)."""
-        # Implémentation de la logique de repli
-        # Exemple: pourrait essayer une autre route de `routes` si disponible,
-        # ou utiliser un autre fournisseur de liquidité.
-        logger.warning(f"_execute_fallback_swap: Implementation placeholder for {input_token} to {output_token} with slippage {slippage_bps} BPS.")
-        raise NotImplementedError("Fallback swap non implémenté")
+        """
+        Implémente un mécanisme de repli si le swap principal échoue.
+        Actuellement, cela pourrait tenter une route de Jupiter différente si l'API en fournissait plusieurs,
+        ou utiliser un autre DEX (non implémenté). Pour l'instant, c'est un placeholder.
+        Returns a structured response.
+        """
+        logger.warning(f"Fallback swap for {amount_in} {input_token} to {output_token} initiated.")
+        # TODO: Implement actual fallback logic.
+        # This might involve:
+        # 1. Trying a different quote from Jupiter if multiple were fetched (not current design of _get_swap_routes).
+        # 2. Trying a different DEX (e.g., Raydium, Orca) via a different adapter if available.
+        # 3. Adjusting slippage or amount slightly.
         
+        # For now, simply log and return failure.
+        error_message = "Fallback swap mechanism not fully implemented."
+        logger.error(error_message)
+        return {'success': False, 'error': error_message, 'data': None}
+
     def _record_transaction(self, result: Dict[str, Any], details: Dict[str, Any]) -> None:
         """Enregistre les détails d'une transaction dans l'historique."""
         transaction_record = {
@@ -289,1016 +676,3 @@ class TradingEngine:
         
         self.transaction_history.append(transaction_record)
         self.last_transaction_signature = result.get("signature")
-
-import logging
-import time
-import asyncio
-from enum import Enum
-from typing import Dict, Any, List, Optional, Tuple, Union, Set, Callable
-import json
-import os
-from dataclasses import dataclass
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-import uuid
-
-from app.strategy_framework import Strategy, Signal, SignalType
-from market.market_data import MarketDataProvider
-from app.risk_manager import RiskManager, Position
-
-# Configuration du logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger("trading_engine")
-
-class OrderType(Enum):
-    """Types d'ordres disponibles."""
-    MARKET = "market"
-    LIMIT = "limit"
-    STOP_LIMIT = "stop_limit"
-    TRAILING_STOP = "trailing_stop"
-
-class OrderSide(Enum):
-    """Côtés des ordres."""
-    BUY = "buy"
-    SELL = "sell"
-
-class OrderStatus(Enum):
-    """États des ordres."""
-    PENDING = "pending"
-    OPEN = "open"
-    FILLED = "filled"
-    PARTIALLY_FILLED = "partially_filled"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    EXPIRED = "expired"
-
-@dataclass
-class Order:
-    """Représentation d'un ordre."""
-    id: str
-    token_address: str
-    token_symbol: str
-    side: OrderSide
-    type: OrderType
-    amount: float
-    price: Optional[float] = None
-    stop_price: Optional[float] = None
-    time_in_force: str = "GTC"  # Good Till Cancelled
-    status: OrderStatus = OrderStatus.PENDING
-    filled_amount: float = 0
-    average_fill_price: Optional[float] = None
-    created_at: float = None
-    updated_at: float = None
-    strategy_name: Optional[str] = None
-    exchange: Optional[str] = None
-    metadata: Dict[str, Any] = None
-    
-    def __post_init__(self):
-        if self.created_at is None:
-            self.created_at = time.time()
-        if self.updated_at is None:
-            self.updated_at = time.time()
-        if self.metadata is None:
-            self.metadata = {}
-        if not self.id:
-            self.id = str(uuid.uuid4())
-
-@dataclass
-class ExecutionResult:
-    """Résultat de l'exécution d'un ordre."""
-    success: bool
-    order: Order
-    message: str
-    transaction_id: Optional[str] = None
-    timestamp: float = None
-    
-    def __post_init__(self):
-        if self.timestamp is None:
-            self.timestamp = time.time()
-
-class ExchangeAdapter:
-    """
-    Classe de base pour l'adaptation aux différentes API d'échange.
-    Cette classe doit être étendue pour chaque plateforme d'échange spécifique.
-    """
-    def __init__(self, api_key: str, api_secret: str, exchange_name: str):
-        """
-        Initialise l'adaptateur d'échange.
-        
-        Args:
-            api_key: Clé API
-            api_secret: Secret API
-            exchange_name: Nom de l'échange
-        """
-        self.api_key = api_key
-        self.api_secret = api_secret
-        self.exchange_name = exchange_name
-        self.last_api_call = 0
-        self.rate_limit_wait = Config.DEFAULT_API_RATE_LIMIT_WAIT_SECONDS
-    
-    async def create_order(self, order: Order) -> ExecutionResult:
-        """
-        Crée un ordre sur l'échange.
-        
-        Args:
-            order: Ordre à créer
-            
-        Returns:
-            Résultat de l'exécution
-        """
-        # Implémentation spécifique à l'échange à fournir dans les sous-classes
-        raise NotImplementedError("Cette méthode doit être implémentée dans une sous-classe")
-    
-    async def cancel_order(self, order_id: str) -> bool:
-        """
-        Annule un ordre existant.
-        
-        Args:
-            order_id: ID de l'ordre à annuler
-            
-        Returns:
-            True si l'annulation a réussi
-        """
-        # Implémentation spécifique à l'échange à fournir dans les sous-classes
-        raise NotImplementedError("Cette méthode doit être implémentée dans une sous-classe")
-    
-    async def get_order_status(self, order_id: str) -> Optional[OrderStatus]:
-        """
-        Récupère le statut d'un ordre.
-        
-        Args:
-            order_id: ID de l'ordre
-            
-        Returns:
-            Statut de l'ordre ou None si non trouvé
-        """
-        # Implémentation spécifique à l'échange à fournir dans les sous-classes
-        raise NotImplementedError("Cette méthode doit être implémentée dans une sous-classe")
-    
-    async def get_account_balances(self) -> Dict[str, float]:
-        """
-        Récupère les soldes du compte.
-        
-        Returns:
-            Dictionnaire des soldes par devise
-        """
-        # Implémentation spécifique à l'échange à fournir dans les sous-classes
-        raise NotImplementedError("Cette méthode doit être implémentée dans une sous-classe")
-    
-    async def get_token_price(self, token_address: str, reference: str = "USDC") -> float:
-        """
-        Récupère le prix actuel d'un token.
-        
-        Args:
-            token_address: Adresse du token
-            reference: Token de référence pour le prix
-            
-        Returns:
-            Prix actuel
-        """
-        # Implémentation spécifique à l'échange à fournir dans les sous-classes
-        raise NotImplementedError("Cette méthode doit être implémentée dans une sous-classe")
-    
-    async def _api_call(self, endpoint: str, method: str = "GET", params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Effectue un appel API avec gestion de la limite de taux.
-        
-        Args:
-            endpoint: Point de terminaison API
-            method: Méthode HTTP
-            params: Paramètres de la requête
-            
-        Returns:
-            Réponse de l'API
-        """
-        # Respecter les limites de taux
-        time_since_last_call = time.time() - self.last_api_call
-        if time_since_last_call < self.rate_limit_wait:
-            await asyncio.sleep(self.rate_limit_wait - time_since_last_call)
-        
-        # Effectuer l'appel API
-        self.last_api_call = time.time()
-        
-        # Cette méthode doit être implémentée dans les sous-classes spécifiques à chaque échange
-        raise NotImplementedError("Cette méthode doit être implémentée dans une sous-classe")
-
-class MockExchangeAdapter(ExchangeAdapter):
-    """Adaptateur d'échange simulé pour les tests et la démonstration."""
-    
-    def __init__(self, initial_balances: Dict[str, float] = None):
-        """
-        Initialise l'adaptateur d'échange simulé.
-        
-        Args:
-            initial_balances: Soldes initiaux du compte
-        """
-        super().__init__("mock_key", "mock_secret", "MockExchange")
-        self.balances = initial_balances or {"USDC": 10000.0, "SOL": 100.0, "BTC": 0.5}
-        self.orders: Dict[str, Order] = {}
-        self.last_prices: Dict[str, float] = {
-            "SOL": 100.0,
-            "BTC": 29000.0,
-            "ETH": 1800.0
-        }
-        self.price_volatility = 0.01  # 1% de volatilité pour la simulation
-    
-    async def create_order(self, order: Order) -> ExecutionResult:
-        """
-        Simule la création d'un ordre.
-        
-        Args:
-            order: Ordre à créer
-            
-        Returns:
-            Résultat de l'exécution
-        """
-        # Simuler un délai réseau
-        await asyncio.sleep(0.1)
-        
-        # Vérifier les soldes
-        if order.side == OrderSide.BUY:
-            quote_currency = "USDC"  # Pour simplifier, on suppose toujours USDC comme devise de référence
-            order_cost = order.price * order.amount if order.price else await self._get_market_price(order.token_symbol) * order.amount
-            
-            if self.balances.get(quote_currency, 0) < order_cost:
-                return ExecutionResult(
-                    success=False,
-                    order=order,
-                    message=f"Solde insuffisant en {quote_currency}"
-                )
-        else:  # SELL
-            if self.balances.get(order.token_symbol, 0) < order.amount:
-                return ExecutionResult(
-                    success=False,
-                    order=order,
-                    message=f"Solde insuffisant en {order.token_symbol}"
-                )
-        
-        # Simuler différents types d'ordres
-        if order.type == OrderType.MARKET:
-            # Les ordres au marché sont exécutés immédiatement
-            price = await self._get_market_price(order.token_symbol)
-            order.price = price
-            order.status = OrderStatus.FILLED
-            order.filled_amount = order.amount
-            order.average_fill_price = price
-            
-            # Mettre à jour les soldes
-            self._update_balances(order)
-            
-        elif order.type == OrderType.LIMIT:
-            # Les ordres limites sont placés dans le carnet d'ordres
-            order.status = OrderStatus.OPEN
-            
-        self.orders[order.id] = order
-        order.updated_at = time.time()
-        
-        return ExecutionResult(
-            success=True,
-            order=order,
-            message="Ordre créé avec succès",
-            transaction_id=f"mock_tx_{int(time.time())}"
-        )
-    
-    async def cancel_order(self, order_id: str) -> bool:
-        """
-        Simule l'annulation d'un ordre.
-        
-        Args:
-            order_id: ID de l'ordre à annuler
-            
-        Returns:
-            True si l'annulation a réussi
-        """
-        await asyncio.sleep(0.1)  # Simuler un délai réseau
-        
-        if order_id in self.orders:
-            order = self.orders[order_id]
-            if order.status in [OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]:
-                order.status = OrderStatus.CANCELLED
-                order.updated_at = time.time()
-                return True
-        
-        return False
-    
-    async def get_order_status(self, order_id: str) -> Optional[OrderStatus]:
-        """
-        Récupère le statut d'un ordre simulé.
-        
-        Args:
-            order_id: ID de l'ordre
-            
-        Returns:
-            Statut de l'ordre ou None si non trouvé
-        """
-        await asyncio.sleep(0.05)  # Simuler un délai réseau
-        
-        if order_id in self.orders:
-            return self.orders[order_id].status
-        
-        return None
-    
-    async def get_account_balances(self) -> Dict[str, float]:
-        """
-        Récupère les soldes simulés du compte.
-        
-        Returns:
-            Dictionnaire des soldes
-        """
-        await asyncio.sleep(0.1)  # Simuler un délai réseau
-        return self.balances.copy()
-    
-    async def get_token_price(self, token_address: str, reference: str = "USDC") -> float:
-        """
-        Récupère un prix simulé pour un token.
-        
-        Args:
-            token_address: Adresse du token
-            reference: Token de référence pour le prix
-            
-        Returns:
-            Prix simulé
-        """
-        # Pour la simplicité, on utilise le symbole directement
-        symbol = token_address.split("_")[-1] if "_" in token_address else token_address
-        return await self._get_market_price(symbol)
-    
-    async def _get_market_price(self, symbol: str) -> float:
-        """
-        Génère un prix de marché simulé avec volatilité.
-        
-        Args:
-            symbol: Symbole du token
-            
-        Returns:
-            Prix simulé
-        """
-        if symbol not in self.last_prices:
-            self.last_prices[symbol] = 10.0  # Prix par défaut pour les nouveaux tokens
-            
-        # Simuler un mouvement de prix
-        price_change = np.random.normal(0, self.price_volatility)
-        new_price = self.last_prices[symbol] * (1 + price_change)
-        self.last_prices[symbol] = new_price
-        
-        return new_price
-    
-    def _update_balances(self, order: Order) -> None:
-        """
-        Met à jour les soldes après l'exécution d'un ordre.
-        
-        Args:
-            order: Ordre exécuté
-        """
-        if order.status != OrderStatus.FILLED:
-            return
-        
-        if order.side == OrderSide.BUY:
-            quote_currency = "USDC"  # Pour simplifier
-            cost = order.average_fill_price * order.filled_amount
-            
-            # Déduire le coût de la devise de référence
-            self.balances[quote_currency] = self.balances.get(quote_currency, 0) - cost
-            
-            # Ajouter les tokens achetés
-            self.balances[order.token_symbol] = self.balances.get(order.token_symbol, 0) + order.filled_amount
-            
-        else:  # SELL
-            proceeds = order.average_fill_price * order.filled_amount
-            quote_currency = "USDC"  # Pour simplifier
-            
-            # Déduire les tokens vendus
-            self.balances[order.token_symbol] = self.balances.get(order.token_symbol, 0) - order.filled_amount
-            
-            # Ajouter le produit de la vente
-            self.balances[quote_currency] = self.balances.get(quote_currency, 0) + proceeds
-    
-    async def process_open_orders(self) -> None:
-        """
-        Simule le traitement des ordres ouverts.
-        Certains ordres peuvent être exécutés en fonction des mouvements de prix simulés.
-        """
-        for order_id, order in list(self.orders.items()):
-            if order.status != OrderStatus.OPEN:
-                continue
-                
-            current_price = await self._get_market_price(order.token_symbol)
-            
-            # Simuler l'exécution des ordres limites lorsque le prix est favorable
-            if order.type == OrderType.LIMIT:
-                if (order.side == OrderSide.BUY and current_price <= order.price) or \
-                   (order.side == OrderSide.SELL and current_price >= order.price):
-                    
-                    order.status = OrderStatus.FILLED
-                    order.filled_amount = order.amount
-                    order.average_fill_price = order.price
-                    order.updated_at = time.time()
-                    
-                    # Mettre à jour les soldes
-                    self._update_balances(order)
-                    logger.info(f"Ordre simulé exécuté: {order_id}, prix: {order.price}, montant: {order.amount}")
-
-class TradingEngine:
-    """
-    Moteur d'exécution de trading qui reçoit les signaux des stratégies,
-    gère les positions et exécute les ordres sur les plateformes d'échange.
-    """
-    
-    def __init__(self, 
-                 exchange_adapter: ExchangeAdapter, 
-                 risk_manager: Optional[Any] = None,
-                 data_provider: Optional[MarketDataProvider] = None):
-        """
-        Initialise le moteur de trading.
-        
-        Args:
-            exchange_adapter: Adaptateur pour l'échange
-            risk_manager: Gestionnaire de risque (optionnel)
-            data_provider: Fournisseur de données de marché (optionnel)
-        """
-        self.exchange = exchange_adapter
-        self.risk_manager = risk_manager
-        self.data_provider = data_provider
-        
-        self.strategies: Dict[str, Any] = {}
-        self.active_positions: Dict[str, Any] = {}  # Par token_address
-        self.pending_orders: Dict[str, Order] = {}  # Par order_id
-        self.executed_trades: List[Dict[str, Any]] = []
-        
-        # Charger la configuration depuis app.config.Config
-        self.config = {
-            "signal_confidence_threshold": Config.TRADE_CONFIDENCE_THRESHOLD,
-            "max_open_positions": Config.MAX_OPEN_POSITIONS,
-            "signal_expiry_seconds": Config.SIGNAL_EXPIRY_SECONDS,
-            "price_check_interval": Config.PRICE_CHECK_INTERVAL_SECONDS,
-            "order_update_interval": Config.ORDER_UPDATE_INTERVAL_SECONDS,
-            "execute_market_orders": Config.EXECUTE_MARKET_ORDERS,
-            "auto_close_positions": Config.AUTO_CLOSE_POSITIONS
-        }
-            
-        self.running = False
-        self.tasks = []
-        
-        logger.info(f"Moteur de trading initialisé avec l'échange {exchange_adapter.exchange_name}")
-    
-    def register_strategy(self, strategy: Any) -> None:
-        """
-        Enregistre une stratégie auprès du moteur de trading.
-        
-        Args:
-            strategy: Stratégie à enregistrer
-        """
-        self.strategies[strategy.name] = strategy
-        logger.info(f"Stratégie enregistrée: {strategy.name}")
-    
-    async def start(self) -> None:
-        """Démarre le moteur de trading."""
-        if self.running:
-            logger.warning("Le moteur de trading est déjà en cours d'exécution")
-            return
-            
-        self.running = True
-        logger.info("Démarrage du moteur de trading...")
-        
-        # Récupérer les soldes initiaux
-        balances = await self.exchange.get_account_balances()
-        logger.info(f"Soldes du compte: {balances}")
-        
-        # Mettre à jour la valeur du portefeuille dans le gestionnaire de risque
-        total_value = 0
-        for token, amount in balances.items():
-            if token != "USDC":  # Pour les tokens non-USDC, obtenir la valeur en USDC
-                try:
-                    price = await self.exchange.get_token_price(token)
-                    total_value += amount * price
-                except Exception as e:
-                    logger.error(f"Erreur lors de l'obtention du prix pour {token}: {e}")
-            else:
-                total_value += amount
-                
-        self.risk_manager.update_portfolio_value(total_value)
-        logger.info(f"Valeur initiale du portefeuille: ${total_value:.2f}")
-        
-        # Démarrer les tâches périodiques
-        self.tasks = [
-            asyncio.create_task(self._process_orders_loop()),
-            asyncio.create_task(self._update_positions_loop())
-        ]
-        
-        logger.info("Moteur de trading démarré")
-        
-    async def stop(self) -> None:
-        """Arrête le moteur de trading."""
-        if not self.running:
-            return
-            
-        self.running = False
-        logger.info("Arrêt du moteur de trading...")
-        
-        # Annuler toutes les tâches
-        for task in self.tasks:
-            task.cancel()
-            
-        try:
-            await asyncio.gather(*self.tasks, return_exceptions=True)
-        except asyncio.CancelledError:
-            pass
-            
-        logger.info("Moteur de trading arrêté")
-    
-    async def process_signal(self, signal: Signal) -> Optional[str]:
-        """
-        Traite un signal généré par une stratégie.
-        
-        Args:
-            signal: Signal à traiter
-            
-        Returns:
-            ID de l'ordre créé ou None
-        """
-        if not self.running:
-            logger.warning("Le moteur de trading n'est pas en cours d'exécution")
-            return None
-            
-        # Vérifier si le signal est assez récent
-        signal_age = time.time() - signal.timestamp
-        if signal_age > self.config["signal_expiry_seconds"]:
-            logger.warning(f"Signal expiré ignoré: {signal.type.value} pour {signal.token_address} (âge: {signal_age:.1f}s)")
-            return None
-            
-        # Vérifier si le signal est suffisamment confiant
-        if signal.confidence < self.config["signal_confidence_threshold"]:
-            logger.info(f"Signal ignoré en raison d'une confiance insuffisante: {signal.confidence:.2f}")
-            return None
-            
-        # Vérifier si nous avons déjà une position pour ce token
-        has_position = signal.token_address in self.active_positions
-        
-        # Pour les signaux d'achat, vérifier si nous avons atteint le nombre maximum de positions
-        if (signal.type in (SignalType.BUY, SignalType.STRONG_BUY) and 
-            len(self.active_positions) >= self.config["max_open_positions"] and 
-            not has_position):
-            logger.warning(f"Signal d'achat ignoré, nombre maximum de positions atteint: {len(self.active_positions)}")
-            return None
-            
-        # Obtenir le prix actuel
-        try:
-            current_price = await self.exchange.get_token_price(signal.token_address)
-        except Exception as e:
-            logger.error(f"Impossible d'obtenir le prix actuel pour {signal.token_address}: {e}")
-            return None
-            
-        # Traiter le signal selon son type
-        if signal.type in (SignalType.BUY, SignalType.STRONG_BUY) and not has_position:
-            return await self._process_buy_signal(signal, current_price)
-        elif signal.type in (SignalType.SELL, SignalType.STRONG_SELL) and has_position:
-            return await self._process_sell_signal(signal, current_price)
-        elif signal.type == SignalType.EXIT and has_position:
-            return await self._close_position(signal.token_address, "exit_signal")
-        else:
-            logger.info(f"Signal ignoré: {signal.type.value} pour {signal.token_address} (a_position={has_position})")
-            return None
-            
-    async def _process_buy_signal(self, signal: Signal, current_price: float) -> Optional[str]:
-        """
-        Traite un signal d'achat.
-        
-        Args:
-            signal: Signal d'achat
-            current_price: Prix actuel
-            
-        Returns:
-            ID de l'ordre créé ou None
-        """
-        token_address = signal.token_address
-        token_symbol = signal.metadata.get("token_symbol", token_address.split("_")[-1] if "_" in token_address else "UNKNOWN")
-        
-        # Calculer la taille de position optimale
-        position_size = self.risk_manager.calculate_position_size(
-            token_address=token_address,
-            token_symbol=token_symbol,
-            entry_price=current_price,
-            stop_loss=signal.stop_loss
-        )
-        
-        if position_size <= 0:
-            logger.info(f"Position ignorée pour {token_symbol}: taille calculée trop petite ({position_size:.2f})")
-            return None
-            
-        # Calculer la quantité à acheter
-        quantity = position_size / current_price
-        
-        # Si la taille est trop petite, ignorer
-        min_order_value = Config.MIN_ORDER_VALUE_USD
-        if position_size < min_order_value:
-            logger.info(f"Position ignorée pour {token_symbol}: trop petite ({position_size:.2f} < {min_order_value})")
-            return None
-            
-        # Créer l'ordre
-        order_type = OrderType.MARKET if self.config["execute_market_orders"] else OrderType.LIMIT
-        
-        order = Order(
-            id="",  # Sera défini lors de la création
-            token_address=token_address,
-            token_symbol=token_symbol,
-            side=OrderSide.BUY,
-            type=order_type,
-            amount=quantity,
-            price=current_price if order_type == OrderType.LIMIT else None,
-            stop_price=None,
-            strategy_name=signal.strategy_name,
-            metadata={
-                "signal_confidence": signal.confidence,
-                "signal_timeframe": signal.timeframe,
-                "stop_loss": signal.stop_loss,
-                "take_profit": signal.take_profit
-            }
-        )
-        
-        # Exécuter l'ordre
-        try:
-            execution_result = await self.exchange.create_order(order)
-            
-            if execution_result.success:
-                # Créer une position
-                position = Position(
-                    token_address=token_address,
-                    token_symbol=token_symbol,
-                    entry_price=current_price,
-                    size=position_size,
-                    entry_time=time.time(),
-                    stop_loss=signal.stop_loss,
-                    take_profit=signal.take_profit
-                )
-                
-                # Ajouter la position
-                pos_id = self.risk_manager.add_position(position)
-                self.active_positions[token_address] = position
-                
-                # Ajouter l'ordre en attente
-                self.pending_orders[execution_result.order.id] = execution_result.order
-                
-                logger.info(f"Position d'achat ouverte pour {token_symbol} à {current_price:.6f}: {quantity:.4f} unités (${position_size:.2f})")
-                
-                return execution_result.order.id
-            else:
-                logger.error(f"Échec de l'ordre d'achat pour {token_symbol}: {execution_result.message}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Erreur lors de la création de l'ordre d'achat pour {token_symbol}: {e}")
-            return None
-            
-    async def _process_sell_signal(self, signal: Signal, current_price: float) -> Optional[str]:
-        """
-        Traite un signal de vente.
-        
-        Args:
-            signal: Signal de vente
-            current_price: Prix actuel
-            
-        Returns:
-            ID de l'ordre créé ou None
-        """
-        token_address = signal.token_address
-        position = self.active_positions.get(token_address)
-        
-        if not position:
-            logger.warning(f"Signal de vente ignoré: aucune position active pour {token_address}")
-            return None
-            
-        # Créer l'ordre
-        order_type = OrderType.MARKET if self.config["execute_market_orders"] else OrderType.LIMIT
-        
-        order = Order(
-            id="",  # Sera défini lors de la création
-            token_address=token_address,
-            token_symbol=position.token_symbol,
-            side=OrderSide.SELL,
-            type=order_type,
-            amount=position.size / current_price,  # Convertir la valeur en unités
-            price=current_price if order_type == OrderType.LIMIT else None,
-            stop_price=None,
-            strategy_name=signal.strategy_name,
-            metadata={
-                "signal_confidence": signal.confidence,
-                "signal_timeframe": signal.timeframe,
-                "entry_price": position.entry_price,
-                "position_duration": time.time() - position.entry_time
-            }
-        )
-        
-        # Exécuter l'ordre
-        try:
-            execution_result = await self.exchange.create_order(order)
-            
-            if execution_result.success:
-                # Calculer le P&L
-                pnl = (current_price / position.entry_price - 1) * position.size
-                pnl_pct = (current_price / position.entry_price - 1) * 100
-                
-                # Enregistrer le trade
-                self._record_trade(position, current_price, "sell_signal", pnl, pnl_pct)
-                
-                # Supprimer la position
-                del self.active_positions[token_address]
-                
-                # Ajouter l'ordre en attente
-                self.pending_orders[execution_result.order.id] = execution_result.order
-                
-                logger.info(f"Position fermée pour {position.token_symbol}: P&L ${pnl:.2f} ({pnl_pct:.2f}%)")
-                
-                return execution_result.order.id
-            else:
-                logger.error(f"Échec de l'ordre de vente pour {position.token_symbol}: {execution_result.message}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Erreur lors de la création de l'ordre de vente pour {position.token_symbol}: {e}")
-            return None
-            
-    async def _close_position(self, token_address: str, reason: str) -> Optional[str]:
-        """
-        Ferme une position existante.
-        
-        Args:
-            token_address: Adresse du token
-            reason: Raison de la fermeture
-            
-        Returns:
-            ID de l'ordre créé ou None
-        """
-        position = self.active_positions.get(token_address)
-        
-        if not position:
-            logger.warning(f"Fermeture de position ignorée: aucune position active pour {token_address}")
-            return None
-            
-        # Obtenir le prix actuel
-        try:
-            current_price = await self.exchange.get_token_price(token_address)
-        except Exception as e:
-            logger.error(f"Impossible d'obtenir le prix actuel pour {token_address}: {e}")
-            return None
-            
-        # Créer un ordre de marché pour fermer la position
-        order = Order(
-            id="",  # Sera défini lors de la création
-            token_address=token_address,
-            token_symbol=position.token_symbol,
-            side=OrderSide.SELL,
-            type=OrderType.MARKET,  # Toujours utiliser un ordre au marché pour les fermetures
-            amount=position.size / current_price,  # Convertir la valeur en unités
-            price=None,
-            stop_price=None,
-            metadata={
-                "close_reason": reason,
-                "entry_price": position.entry_price,
-                "position_duration": time.time() - position.entry_time
-            }
-        )
-        
-        # Exécuter l'ordre
-        try:
-            execution_result = await self.exchange.create_order(order)
-            
-            if execution_result.success:
-                # Calculer le P&L
-                pnl = (current_price / position.entry_price - 1) * position.size
-                pnl_pct = (current_price / position.entry_price - 1) * 100
-                
-                # Enregistrer le trade
-                self._record_trade(position, current_price, reason, pnl, pnl_pct)
-                
-                # Supprimer la position
-                del self.active_positions[token_address]
-                
-                # Ajouter l'ordre en attente
-                self.pending_orders[execution_result.order.id] = execution_result.order
-                
-                logger.info(f"Position fermée pour {position.token_symbol} ({reason}): P&L ${pnl:.2f} ({pnl_pct:.2f}%)")
-                
-                return execution_result.order.id
-            else:
-                logger.error(f"Échec de la fermeture de position pour {position.token_symbol}: {execution_result.message}")
-                return None
-                
-        except Exception as e:
-            logger.error(f"Erreur lors de la fermeture de position pour {position.token_symbol}: {e}")
-            return None
-            
-    def _record_trade(self, position: Position, exit_price: float, exit_reason: str, 
-                    profit_loss: float, profit_pct: float) -> None:
-        """
-        Enregistre un trade complété dans l'historique.
-        
-        Args:
-            position: Position fermée
-            exit_price: Prix de sortie
-            exit_reason: Raison de la sortie
-            profit_loss: P&L en valeur absolue
-            profit_pct: P&L en pourcentage
-        """
-        trade = {
-            "token_address": position.token_address,
-            "token_symbol": position.token_symbol,
-            "entry_price": position.entry_price,
-            "exit_price": exit_price,
-            "size": position.size,
-            "entry_time": position.entry_time,
-            "exit_time": time.time(),
-            "profit_loss": profit_loss,
-            "profit_pct": profit_pct,
-            "exit_reason": exit_reason
-        }
-        
-        self.executed_trades.append(trade)
-        
-        # Si le gestionnaire de risque est disponible, mettre à jour les volatilités
-        if hasattr(self.risk_manager, 'update_price_history'):
-            self.risk_manager.update_price_history(position.token_address, exit_price)
-            
-    async def _process_orders_loop(self) -> None:
-        """Boucle de traitement des ordres en attente."""
-        while self.running:
-            try:
-                # Attendre l'intervalle configuré
-                await asyncio.sleep(self.config["order_update_interval"])
-                
-                # Copie des clés pour éviter la modification pendant l'itération
-                order_ids = list(self.pending_orders.keys())
-                
-                for order_id in order_ids:
-                    if order_id not in self.pending_orders:
-                        continue
-                        
-                    order = self.pending_orders[order_id]
-                    
-                    # Vérifier le statut de l'ordre
-                    status = await self.exchange.get_order_status(order_id)
-                    
-                    if status == OrderStatus.FILLED:
-                        logger.info(f"Ordre {order_id} exécuté: {order.token_symbol} {order.side.value.upper()} à {order.price}")
-                        
-                        # Si c'était un ordre d'achat, il a déjà été enregistré comme position
-                        
-                        # Supprimer de la liste des ordres en attente
-                        del self.pending_orders[order_id]
-                        
-                    elif status in (OrderStatus.REJECTED, OrderStatus.CANCELLED, OrderStatus.EXPIRED):
-                        logger.warning(f"Ordre {order_id} {status.value}: {order.token_symbol} {order.side.value.upper()}")
-                        
-                        # Si c'était un ordre d'achat et qu'il est rejeté/annulé, supprimer la position
-                        if order.side == OrderSide.BUY and order.token_address in self.active_positions:
-                            del self.active_positions[order.token_address]
-                            logger.info(f"Position {order.token_symbol} supprimée suite à l'échec de l'ordre")
-                            
-                        # Supprimer de la liste des ordres en attente
-                        del self.pending_orders[order_id]
-                        
-            except asyncio.CancelledError:
-                logger.info("Boucle de traitement des ordres arrêtée")
-                break
-            except Exception as e:
-                logger.error(f"Erreur dans la boucle de traitement des ordres: {e}")
-                
-    async def _update_positions_loop(self) -> None:
-        """Boucle de mise à jour des positions actives."""
-        while self.running:
-            try:
-                # Attendre l'intervalle configuré
-                await asyncio.sleep(self.config["price_check_interval"])
-                
-                # Copie des clés pour éviter la modification pendant l'itération
-                token_addresses = list(self.active_positions.keys())
-                
-                for token_address in token_addresses:
-                    if token_address not in self.active_positions:
-                        continue
-                        
-                    position = self.active_positions[token_address]
-                    
-                    # Obtenir le prix actuel
-                    try:
-                        current_price = await self.exchange.get_token_price(token_address)
-                    except Exception as e:
-                        logger.error(f"Impossible d'obtenir le prix actuel pour {position.token_symbol}: {e}")
-                        continue
-                        
-                    # Mettre à jour la position avec le nouveau prix
-                    self.risk_manager.update_position(token_address, current_price)
-                    
-                    # Si la fermeture automatique est activée, vérifier les conditions de stop-loss et take-profit
-                    if self.config["auto_close_positions"]:
-                        # Vérifier le stop-loss
-                        if position.stop_loss is not None and current_price <= position.stop_loss:
-                            logger.warning(f"Stop-loss déclenché pour {position.token_symbol} à {current_price:.6f}")
-                            await self._close_position(token_address, "stop_loss")
-                            continue
-                            
-                        # Vérifier le take-profit
-                        if position.take_profit is not None and current_price >= position.take_profit:
-                            logger.info(f"Take-profit atteint pour {position.token_symbol} à {current_price:.6f}")
-                            await self._close_position(token_address, "take_profit")
-                            continue
-                    
-                # Mettre à jour la valeur totale du portefeuille
-                await self._update_portfolio_value()
-                
-            except asyncio.CancelledError:
-                logger.info("Boucle de mise à jour des positions arrêtée")
-                break
-            except Exception as e:
-                logger.error(f"Erreur dans la boucle de mise à jour des positions: {e}")
-                
-    async def _update_portfolio_value(self) -> None:
-        """Met à jour la valeur totale du portefeuille."""
-        try:
-            # Obtenir les soldes
-            balances = await self.exchange.get_account_balances()
-            
-            # Calculer la valeur en USD
-            total_value = 0
-            
-            for token, amount in balances.items():
-                if token == "USDC" or token == "USDT" or token == "USD":
-                    total_value += amount
-                else:
-                    try:
-                        price = await self.exchange.get_token_price(token)
-                        total_value += amount * price
-                    except Exception as e:
-                        logger.error(f"Erreur lors de l'obtention du prix pour {token}: {e}")
-                        
-            # Mettre à jour la valeur du portefeuille dans le gestionnaire de risque
-            self.risk_manager.update_portfolio_value(total_value)
-            
-        except Exception as e:
-            logger.error(f"Erreur lors de la mise à jour de la valeur du portefeuille: {e}")
-            
-    async def get_portfolio_status(self) -> Dict[str, Any]:
-        """
-        Obtient le statut du portefeuille actuel.
-        
-        Returns:
-            Statut du portefeuille
-        """
-        try:
-            # Obtenir les métriques de risque
-            risk_metrics = await self.risk_manager.calculate_risk_metrics()
-            
-            # Obtenir les soldes
-            balances = await self.exchange.get_account_balances()
-            
-            # Construire le statut
-            status = {
-                "timestamp": time.time(),
-                "portfolio_value": self.risk_manager.portfolio_value,
-                "risk_metrics": {
-                    "var_95": risk_metrics.var_95,
-                    "max_drawdown": risk_metrics.max_drawdown,
-                    "sharpe_ratio": risk_metrics.sharpe_ratio,
-                    "current_exposure": risk_metrics.current_exposure
-                },
-                "balances": balances,
-                "active_positions": len(self.active_positions),
-                "positions": [],
-                "executed_trades_count": len(self.executed_trades),
-                "recent_trades": self.executed_trades[-10:] if self.executed_trades else []
-            }
-            
-            # Ajouter les détails des positions
-            for token_address, position in self.active_positions.items():
-                try:
-                    current_price = await self.exchange.get_token_price(token_address)
-                    
-                    # Calculer le P&L non réalisé
-                    unrealized_pnl = (current_price / position.entry_price - 1) * position.size
-                    unrealized_pnl_pct = (current_price / position.entry_price - 1) * 100
-                    
-                    status["positions"].append({
-                        "token_address": token_address,
-                        "token_symbol": position.token_symbol,
-                        "entry_price": position.entry_price,
-                        "current_price": current_price,
-                        "size": position.size,
-                        "unrealized_pnl": unrealized_pnl,
-                        "unrealized_pnl_pct": unrealized_pnl_pct,
-                        "entry_time": position.entry_time,
-                        "duration_hours": (time.time() - position.entry_time) / 3600,
-                        "stop_loss": position.stop_loss,
-                        "take_profit": position.take_profit
-                    })
-                    
-                except Exception as e:
-                    logger.error(f"Erreur lors de l'obtention des détails de la position {token_address}: {e}")
-            
-            return status
-            
-        except Exception as e:
-            logger.error(f"Erreur lors de l'obtention du statut du portefeuille: {e}")
-            return {
-                "timestamp": time.time(),
-                "error": str(e)
-            }

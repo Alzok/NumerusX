@@ -57,17 +57,31 @@ class EnhancedDatabase:
 
     def record_trade(self, trade_data: dict):
         try:
-            self.conn.execute('''
-                INSERT INTO trades 
-                (pair_address, amount, entry_price, protocol)
-                VALUES (?, ?, ?, ?)
-            ''', (
-                trade_data['pair'],
-                trade_data['amount'],
-                trade_data.get('entry_price', 0.0),
-                trade_data.get('protocol', 'unknown')
-            ))
-            self.conn.commit()
+            # Input validation
+            if not all(k in trade_data for k in ['pair', 'amount']):
+                self.logger.error("Missing required keys in trade_data for record_trade.")
+                return
+            if not isinstance(trade_data['pair'], str) or not trade_data['pair']:
+                self.logger.error("Invalid 'pair' in trade_data for record_trade.")
+                return
+            try:
+                amount = float(trade_data['amount'])
+                entry_price = float(trade_data.get('entry_price', 0.0))
+            except ValueError:
+                self.logger.error("Invalid numerical values for 'amount' or 'entry_price' in trade_data.")
+                return
+
+            with self.conn:
+                self.conn.execute('''
+                    INSERT INTO trades 
+                    (pair_address, amount, entry_price, protocol)
+                    VALUES (?, ?, ?, ?)
+                ''', (
+                    trade_data['pair'],
+                    amount,
+                    entry_price,
+                    trade_data.get('protocol', 'unknown')
+                ))
         except sqlite3.Error as e:
             self.logger.error(f"Erreur enregistrement trade: {str(e)}")
 
@@ -87,10 +101,26 @@ class EnhancedDatabase:
 
     def add_blacklist(self, address: str, reason: str, metadata: dict):
         try:
-            self.conn.execute('''
-                INSERT OR REPLACE INTO blacklist 
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (address, reason, json.dumps(metadata)))
-            self.conn.commit()
+            # Input validation
+            if not isinstance(address, str) or not address:
+                self.logger.error("Invalid 'address' for add_blacklist.")
+                return
+            if not isinstance(reason, str) or not reason:
+                self.logger.error("Invalid 'reason' for add_blacklist.")
+                return
+            if not isinstance(metadata, dict):
+                self.logger.error("Invalid 'metadata' for add_blacklist, must be a dict.")
+                return
+
+            with self.conn:
+                self.conn.execute('''
+                    INSERT OR REPLACE INTO blacklist 
+                    (address, reason, metadata, timestamp)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (address, reason, json.dumps(metadata)))
         except sqlite3.IntegrityError:
-            pass
+            # This can happen if two threads try to add the same address at the exact same time,
+            # even with INSERT OR REPLACE. Or other integrity issues.
+            self.logger.warning(f"IntegrityError while adding to blacklist, likely a concurrent write or invalid data: {address}")
+        except sqlite3.Error as e:
+            self.logger.error(f"Database error while adding to blacklist {address}: {e}")
