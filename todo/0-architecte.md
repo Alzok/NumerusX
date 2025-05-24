@@ -21,53 +21,52 @@ Ce diagramme illustre les principaux composants de NumerusX et leurs interaction
 ```mermaid
 graph TD
     subgraph "Utilisateur & Contrôle Externe"
-        UI[Interface Utilisateur NiceGUI<br>(app/dashboard.py)]
+        UI["Interface Utilisateur NiceGUI<br>(app/dashboard.py)"]
     end
 
     subgraph "Orchestration & Logique de Base"
-        MAIN[Point d'Entrée<br>(app/main.py)]
-        BOT[Orchestrateur de Flux<br>(app/dex_bot.py)]
-        CONFIG[Configuration<br>(app/config.py)]
-        LOGGER[Journalisation<br>(app/logger.py)]
-        DB[Base de Données SQLite<br>(app/database.py)]
+        MAIN["Point d'Entrée<br>(app/main.py)"]
+        BOT["Orchestrateur de Flux<br>(app/dex_bot.py)"]
+        CONFIG["Configuration<br>(app/config.py)"]
+        LOGGER["Journalisation<br>(app/logger.py)"]
+        DB["Base de Données SQLite<br>(app/database.py)"]
     end
 
     subgraph "Fournisseurs de Données & Signaux"
-        MDP[Fournisseur de Données de Marché<br>(app/market/market_data.py)]
-        EXT_JUP[API Jupiter]
-        EXT_DEX[API DexScreener]
-        EXT_SOCIAL[APIs Sociales/News (Future)]
+        MDP["Fournisseur de Données de Marché<br>(app/market/market_data.py)"]
+        EXT_JUP["API Jupiter"]
+        EXT_DEX["API DexScreener"]
+        EXT_SOCIAL["APIs Sociales/News (Future)"]
         
-        SF[Cadre de Stratégies (Fournisseur de Signaux)<br>(app/strategy_framework.py)]
-        USER_STRATS[Stratégies Spécifiques (Input Sources)<br>(app/strategies/)]
-        STRAT_ADV[Analyse Technique Avancée (Input Source)<br>(app/analytics_engine.py)]
+        SF["Cadre de Stratégies (Fournisseur de Signaux)<br>(app/strategy_framework.py)"]
+        USER_STRATS["Stratégies Spécifiques (Input Sources)<br>(app/strategies/)"]
+        STRAT_ADV["Analyse Technique Avancée (Input Source)<br>(app/analytics_engine.py)"]
         
-        PE[Moteur de Prédiction IA (Input Source)<br>(app/prediction_engine.py)]
-        PP[Prédicteur de Prix (ML/DL)]
-        MRC[Classifier Régime Marché (Future)]
-        SP[Analyseur de Sentiment (Future)]
+        PE["Moteur de Prédiction IA (Input Source)<br>(app/prediction_engine.py)"]
+        PP["Prédicteur de Prix (ML/DL)"]
+        MRC["Classifier Régime Marché (Future)"]
+        SP["Analyseur de Sentiment (Future)"]
         %% ADV_AI[Modules IA Avancés (GNN, TDA, Causal, etc.)]
     end
 
     subgraph "Noyau Décisionnel Intelligent"
-        AI_AGENT[<<Agent IA Décisionnel Central>>
-(app/ai_agent.py)]
+        AI_AGENT["<<Agent IA Décisionnel Central>>\n(app/ai_agent.py)"]
     end
     
     subgraph "Contrôle & Validation Pré-Trade"
-        RISK[Gestionnaire de Risques<br>(app/risk_manager.py)]
-        SEC[Vérificateur de Sécurité Token<br>(app/security/security.py)]
-        PORTFOLIO[Gestionnaire de Portefeuille<br>(app/portfolio_manager.py)]
+        RISK["Gestionnaire de Risques<br>(app/risk_manager.py)"]
+        SEC["Vérificateur de Sécurité Token<br>(app/security/security.py)"]
+        PORTFOLIO["Gestionnaire de Portefeuille<br>(app/portfolio_manager.py)"]
     end
 
     subgraph "Exécution & Interaction Blockchain"
-        EXEC[Exécuteur de Trade<br>(app/trade_executor.py)]
-        TE[Moteur d'Exécution de Trades<br>(app/trading/trading_engine.py)]
-        SOL[Réseau Solana & DEXs]
+        EXEC["Exécuteur de Trade<br>(app/trade_executor.py)"]
+        TE["Moteur d'Exécution de Trades<br>(app/trading/trading_engine.py)"]
+        SOL["Réseau Solana & DEXs"]
     end
 
     subgraph "Outils de Développement & Évaluation"
-        BACKTEST[Moteur de Backtesting]
+        BACKTEST["Moteur de Backtesting"]
     end
 
     %% Liaisons
