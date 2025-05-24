@@ -85,11 +85,14 @@ graph TD
     SEC_INFO --> AI_AGENT_CORE;
     PORT_INFO --> AI_AGENT_CORE;
     
-    AI_AGENT_CORE --> C; %% AI Agent returns decision to Orchestrator
+    AI_AGENT_CORE --> C;
+    %% AI Agent returns decision to Orchestrator
     C --> EXEC_ENG;
     EXEC_ENG --> TRADE_SYS;
-    EXEC_ENG --> DB_STORE; %% For trade recording
-    AI_AGENT_CORE --> DB_STORE; %% For decision logging
+    EXEC_ENG --> DB_STORE;
+    %% For trade recording
+    AI_AGENT_CORE --> DB_STORE;
+    %% For decision logging
 
     D --> C;
     A --> F("app/config.py");

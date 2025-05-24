@@ -84,37 +84,49 @@ graph TD
 
     BOT --> SF
     SF --> USER_STRATS
-    USER_STRATS --> AI_AGENT %% Stratégies fournissent des inputs à l'Agent
-    STRAT_ADV --> AI_AGENT %% Analyse technique fournit inputs à l'Agent
+    USER_STRATS --> AI_AGENT
+    %% Stratégies fournissent des inputs à l'Agent
+    STRAT_ADV --> AI_AGENT
+    %% Analyse technique fournit inputs à l'Agent
     
     BOT --> PE
     PE --> PP
     PE --> MRC
     PE --> SP
-    PE --> AI_AGENT %% Prédictions IA fournissent inputs à l'Agent
+    PE --> AI_AGENT
+    %% Prédictions IA fournissent inputs à l'Agent
     %% ADV_AI --> AI_AGENT
 
     BOT --> RISK
     BOT --> SEC
     BOT --> PORTFOLIO
 
-    RISK --> AI_AGENT %% Contraintes de risque pour l'Agent
-    SEC --> AI_AGENT  %% Contraintes de sécurité pour l'Agent
-    PORTFOLIO --> AI_AGENT %% État du portefeuille pour l'Agent
-    MDP --> AI_AGENT %% Données de marché directes pour l'Agent
+    RISK --> AI_AGENT
+    %% Contraintes de risque pour l'Agent
+    SEC --> AI_AGENT
+    %% Contraintes de sécurité pour l'Agent
+    PORTFOLIO --> AI_AGENT
+    %% État du portefeuille pour l'Agent
+    MDP --> AI_AGENT
+    %% Données de marché directes pour l'Agent
 
-    AI_AGENT --> BOT %% L'Agent retourne la décision finale au Bot orchestrateur
-    BOT --> EXEC %% Le Bot transmet l'ordre de l'Agent à l'exécuteur
+    AI_AGENT --> BOT
+    %% L'Agent retourne la décision finale au Bot orchestrateur
+    BOT --> EXEC
+    %% Le Bot transmet l'ordre de l'Agent à l'exécuteur
 
     EXEC --> TE
-    EXEC --> PORTFOLIO %% Mise à jour post-trade
-    EXEC --> RISK %% Mise à jour post-trade
+    EXEC --> PORTFOLIO
+    %% Mise à jour post-trade
+    EXEC --> RISK
+    %% Mise à jour post-trade
     TE --> SOL
 
     BACKTEST --> MDP
     BACKTEST --> SF
     BACKTEST --> PE 
-    BACKTEST --> AI_AGENT %% Backtesting de l'agent lui-même
+    BACKTEST --> AI_AGENT
+    %% Backtesting de l'agent lui-même
 ```
 
 **Boucles de Traitement Redéfinies**:
