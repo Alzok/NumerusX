@@ -12,7 +12,8 @@ import base58
 import os
 import json
 
-from market.market_data import MarketDataProvider
+from app.market.market_data import MarketDataProvider
+from app.config import Config
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levellevel)s - %(message)s')
@@ -21,16 +22,16 @@ logger = logging.getLogger("trading_engine")
 class TradingEngine:
     """Moteur de trading optimisé pour exécuter des opérations sur les DEX Solana."""
     
-    def __init__(self, wallet_path: str, rpc_url: str = "https://api.mainnet-beta.solana.com"):
+    def __init__(self, wallet_path: str, rpc_url: Optional[str] = None):
         """
         Initialise le moteur de trading.
         
         Args:
             wallet_path: Chemin vers le fichier de clé du portefeuille
-            rpc_url: URL du point de terminaison RPC Solana
+            rpc_url: URL du point de terminaison RPC Solana. Utilise Config.SOLANA_RPC_URL par défaut.
         """
-        self.rpc_url = rpc_url
-        self.client = AsyncClient(rpc_url)
+        self.rpc_url = rpc_url if rpc_url is not None else Config.SOLANA_RPC_URL
+        self.client = AsyncClient(self.rpc_url)
         self.wallet = self._initialize_wallet(wallet_path)
         self.market_data_provider = None
         self.last_transaction_signature = None
@@ -79,7 +80,7 @@ class TradingEngine:
             # Implémenter une stratégie de repli - par exemple, utiliser une clé de secours
             try:
                 # Essayer d'utiliser un fichier de clé de secours ou une variable d'environnement
-                backup_wallet_path = os.environ.get("BACKUP_WALLET_PATH")
+                backup_wallet_path = Config.BACKUP_WALLET_PATH
                 if backup_wallet_path and os.path.exists(backup_wallet_path):
                     logger.warning(f"Utilisation du portefeuille de secours: {backup_wallet_path}")
                     return self._initialize_wallet(backup_wallet_path)
@@ -122,7 +123,7 @@ class TradingEngine:
             
             if fee_response.value is None:
                 # Utiliser une estimation de repli
-                fee_calculator = FeeCalculator(5000)  # 5000 lamports par signature
+                fee_calculator = FeeCalculator(Config.DEFAULT_FEE_PER_SIGNATURE_LAMPORTS)
                 signatures_count = len(transaction.signatures)
                 estimated_fee = fee_calculator.calculate_fee(transaction.serialize_message()) 
                 logger.warning(f"Utilisation de l'estimation de repli des frais: {estimated_fee} lamports")
@@ -133,10 +134,10 @@ class TradingEngine:
         except Exception as e:
             logger.error(f"Erreur lors de l'estimation des frais: {e}")
             # Valeur par défaut sécuritaire
-            return 5000 * len(transaction.signatures)  # 5000 lamports par signature
+            return Config.DEFAULT_FEE_PER_SIGNATURE_LAMPORTS * len(transaction.signatures)
             
     async def execute_swap(self, input_token: str, output_token: str, 
-                          amount_in: float, slippage: float = 0.5) -> Dict[str, Any]:
+                          amount_in: float, slippage_bps: Optional[int] = None) -> Dict[str, Any]:
         """
         Exécute un swap entre deux tokens avec estimation des frais.
         
@@ -144,14 +145,17 @@ class TradingEngine:
             input_token: Adresse du token d'entrée
             output_token: Adresse du token de sortie
             amount_in: Montant à échanger
-            slippage: Tolérance de slippage en pourcentage
+            slippage_bps: Tolérance de slippage en points de base (BPS). Utilise Config.SLIPPAGE_BPS par défaut.
             
         Returns:
             Résultat de la transaction
         """
+        current_slippage_bps = slippage_bps if slippage_bps is not None else Config.SLIPPAGE_BPS
+        logger.info(f"Executing swap with slippage: {current_slippage_bps} BPS")
+
         try:
             # Obtenir les meilleures routes pour le swap
-            routes = await self._get_swap_routes(input_token, output_token, amount_in)
+            routes = await self._get_swap_routes(input_token, output_token, amount_in, current_slippage_bps)
             
             # Sélectionner la meilleure route en tenant compte du prix et des frais
             best_route = await self._select_best_quote(routes, amount_in)
@@ -183,7 +187,7 @@ class TradingEngine:
             # Essayer un chemin d'exécution alternatif
             try:
                 logger.warning("Tentative d'exécution sur une route alternative...")
-                return await self._execute_fallback_swap(input_token, output_token, amount_in, slippage)
+                return await self._execute_fallback_swap(input_token, output_token, amount_in, current_slippage_bps)
             except Exception as fallback_e:
                 logger.error(f"Échec également de la route alternative: {fallback_e}")
                 raise Exception(f"Impossible d'exécuter le swap: {e}")
@@ -235,9 +239,24 @@ class TradingEngine:
             
         return best_route
         
-    async def _get_swap_routes(self, input_token: str, output_token: str, amount_in: float) -> List[Dict[str, Any]]:
+    async def _get_swap_routes(self, input_token: str, output_token: str, amount_in: float, slippage_bps: int) -> List[Dict[str, Any]]:
         """Obtient les routes possibles pour un swap."""
         # Implémentation pour obtenir les routes de swap
+        # Cette méthode devrait utiliser market_data_provider et passer slippage_bps à l'API Jupiter
+        if not self.market_data_provider:
+            logger.error("MarketDataProvider non initialisé.")
+            return []
+        
+        # Convertir amount_in en unitée la plus petite du token (lamports pour SOL, etc.)
+        # Ceci dépendra de la décimale du input_token. Pour l'instant, supposons que amount_in est déjà dans la bonne unité pour l'API.
+        # Ou que market_data_provider gère la conversion.
+
+        # Exemple d'appel (à adapter avec la vraie méthode de market_data_provider):
+        # routes = await self.market_data_provider.get_jupiter_quotes(
+        #     input_token, output_token, amount_in, slippage_bps
+        # )
+        # return routes
+        logger.warning("_get_swap_routes: Implementation placeholder. Needs to call MarketDataProvider with slippage_bps.")
         pass
         
     async def _build_swap_transaction(self, route: Dict[str, Any]) -> Dict[str, Any]:
@@ -251,10 +270,13 @@ class TradingEngine:
         pass
         
     async def _execute_fallback_swap(self, input_token: str, output_token: str, 
-                                   amount_in: float, slippage: float) -> Dict[str, Any]:
-        """Exécute un swap via un chemin alternatif si la méthode principale échoue."""
-        # Implémentation du chemin alternatif
-        pass
+                                   amount_in: float, slippage_bps: int) -> Dict[str, Any]:
+        """Tente un swap avec un mécanisme de repli (ex: autre route, DEX différent)."""
+        # Implémentation de la logique de repli
+        # Exemple: pourrait essayer une autre route de `routes` si disponible,
+        # ou utiliser un autre fournisseur de liquidité.
+        logger.warning(f"_execute_fallback_swap: Implementation placeholder for {input_token} to {output_token} with slippage {slippage_bps} BPS.")
+        raise NotImplementedError("Fallback swap non implémenté")
         
     def _record_transaction(self, result: Dict[str, Any], details: Dict[str, Any]) -> None:
         """Enregistre les détails d'une transaction dans l'historique."""
@@ -373,7 +395,7 @@ class ExchangeAdapter:
         self.api_secret = api_secret
         self.exchange_name = exchange_name
         self.last_api_call = 0
-        self.rate_limit_wait = 0.2  # Temps d'attente entre les appels API en secondes
+        self.rate_limit_wait = Config.DEFAULT_API_RATE_LIMIT_WAIT_SECONDS
     
     async def create_order(self, order: Order) -> ExecutionResult:
         """
@@ -685,9 +707,8 @@ class TradingEngine:
     
     def __init__(self, 
                  exchange_adapter: ExchangeAdapter, 
-                 risk_manager: Optional[RiskManager] = None,
-                 data_provider: Optional[MarketDataProvider] = None,
-                 config_path: Optional[str] = None):
+                 risk_manager: Optional[Any] = None,
+                 data_provider: Optional[MarketDataProvider] = None):
         """
         Initialise le moteur de trading.
         
@@ -695,53 +716,33 @@ class TradingEngine:
             exchange_adapter: Adaptateur pour l'échange
             risk_manager: Gestionnaire de risque (optionnel)
             data_provider: Fournisseur de données de marché (optionnel)
-            config_path: Chemin vers un fichier de configuration (optionnel)
         """
         self.exchange = exchange_adapter
-        self.risk_manager = risk_manager or RiskManager()
+        self.risk_manager = risk_manager
         self.data_provider = data_provider
         
-        self.strategies: Dict[str, Strategy] = {}
-        self.active_positions: Dict[str, Position] = {}  # Par token_address
+        self.strategies: Dict[str, Any] = {}
+        self.active_positions: Dict[str, Any] = {}  # Par token_address
         self.pending_orders: Dict[str, Order] = {}  # Par order_id
         self.executed_trades: List[Dict[str, Any]] = []
         
-        # Configuration par défaut
+        # Charger la configuration depuis app.config.Config
         self.config = {
-            "signal_confidence_threshold": 0.6,
-            "max_open_positions": 10,
-            "signal_expiry_seconds": 300,  # 5 minutes
-            "price_check_interval": 30,  # 30 secondes
-            "order_update_interval": 15,  # 15 secondes
-            "execute_market_orders": True,
-            "auto_close_positions": True
+            "signal_confidence_threshold": Config.TRADE_CONFIDENCE_THRESHOLD,
+            "max_open_positions": Config.MAX_OPEN_POSITIONS,
+            "signal_expiry_seconds": Config.SIGNAL_EXPIRY_SECONDS,
+            "price_check_interval": Config.PRICE_CHECK_INTERVAL_SECONDS,
+            "order_update_interval": Config.ORDER_UPDATE_INTERVAL_SECONDS,
+            "execute_market_orders": Config.EXECUTE_MARKET_ORDERS,
+            "auto_close_positions": Config.AUTO_CLOSE_POSITIONS
         }
-        
-        # Charger la configuration si disponible
-        if config_path and os.path.exists(config_path):
-            self._load_config(config_path)
             
         self.running = False
         self.tasks = []
         
         logger.info(f"Moteur de trading initialisé avec l'échange {exchange_adapter.exchange_name}")
     
-    def _load_config(self, config_path: str) -> None:
-        """
-        Charge la configuration depuis un fichier JSON.
-        
-        Args:
-            config_path: Chemin vers le fichier de configuration
-        """
-        try:
-            with open(config_path, 'r') as f:
-                loaded_config = json.load(f)
-                self.config.update(loaded_config)
-            logger.info(f"Configuration chargée depuis {config_path}")
-        except Exception as e:
-            logger.error(f"Erreur lors du chargement de la configuration: {e}")
-    
-    def register_strategy(self, strategy: Strategy) -> None:
+    def register_strategy(self, strategy: Any) -> None:
         """
         Enregistre une stratégie auprès du moteur de trading.
         
@@ -889,7 +890,7 @@ class TradingEngine:
         quantity = position_size / current_price
         
         # Si la taille est trop petite, ignorer
-        min_order_value = 10  # Valeur minimale en USD
+        min_order_value = Config.MIN_ORDER_VALUE_USD
         if position_size < min_order_value:
             logger.info(f"Position ignorée pour {token_symbol}: trop petite ({position_size:.2f} < {min_order_value})")
             return None

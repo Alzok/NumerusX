@@ -5,8 +5,9 @@ from typing import Dict, List, Optional, Any
 import logging
 import asyncio
 
-from app.security import Security
-from app.trading_engine import TradingEngine
+from app.config import Config
+from app.security.security import Security
+from app.trading.trading_engine import TradingEngine
 from app.analytics_engine import AdvancedTradingStrategy
 from app.database import db, User, Trade
 from app.wallet import SolanaWallet
@@ -17,7 +18,7 @@ app = FastAPI(title="NumerusX Trading API", version="1.0.0")
 # Configuration CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # À ajuster en production
+    allow_origins=Config.CORS_ALLOWED_ORIGINS.split(',') if Config.CORS_ALLOWED_ORIGINS else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,246 +1,160 @@
 ![Logo](logo.jpg)
 
-# NumerusX - Plateforme avancée de trading algorithmique pour les cryptomonnaies
+# NumerusX: Your Intelligent Navigator for Cryptocurrency Trading
 
-NumerusX est une plateforme complète de trading algorithmique pour le marché des cryptomonnaies, conçue pour développer, tester et déployer des stratégies de trading automatisées avec une attention particulière à la gestion du risque, la prédiction de prix et l'analyse de sécurité.
+NumerusX is a sophisticated software platform designed to empower users in the complex world of cryptocurrency trading. Think of it as an intelligent assistant that helps you make informed decisions, automate your trading strategies, and manage your digital assets on the Solana blockchain, a fast and efficient network for crypto transactions.
 
-## Caractéristiques principales
+## What Can NumerusX Do For You?
 
-- **Framework de stratégies flexibles** : Développez des stratégies personnalisées en utilisant un cadre extensible.
-- **Backtest et optimisation** : Testez et optimisez vos stratégies avec des données historiques précises.
-- **Gestion avancée des risques** : Contrôlez votre exposition et protégez votre capital avec des outils de gestion du risque sophistiqués.
-- **Analyse de sentiment** : Intégrez l'analyse de sentiment des réseaux sociaux dans vos stratégies.
-- **Prédiction de prix par ML** : Utilisez des modèles d'apprentissage automatique pour anticiper les mouvements de prix.
-- **Vérifications de sécurité** : Protégez-vous contre les escroqueries et les tokens à risque.
-- **Évaluation et débogage** : Analysez et améliorez la performance de vos stratégies.
+At its core, NumerusX aims to make advanced trading techniques accessible and manageable. Here's how:
 
-## Structure du projet
+*   **Smart Trading Strategies**: NumerusX allows you to define and automate your own trading approaches. Whether you prefer to follow market trends, react to specific price movements, or employ more complex logic, the platform provides the tools to bring your strategies to life.
+*   **AI-Powered Insights**: Going beyond simple automation, NumerusX leverages Artificial Intelligence (AI) to analyze market data, predict potential price movements, and even understand market sentiment by looking at social media trends. This helps in identifying opportunities and risks that might not be obvious at first glance.
+*   **Risk Management First**: The cryptocurrency market can be volatile. NumerusX is built with a strong emphasis on managing risk. It helps you define safety nets, such as setting limits on potential losses, and employs techniques to protect your investments.
+*   **Security Shield**: NumerusX includes features to help identify potentially risky tokens or fraudulent schemes, adding an extra layer of security to your trading activities.
+*   **Market Understanding**: The platform constantly gathers and processes market data from various sources, ensuring that your trading decisions are based on the latest information available. It can analyze liquidity (how easily an asset can be bought or sold) and track significant market events.
+*   **Performance Tracking**: Understand how well your strategies are performing with clear reports and visualizations. This allows you to learn, adapt, and refine your approach over time.
+*   **User-Friendly Dashboard**: (Under development) A clear and intuitive dashboard will provide a central hub to monitor your trading bot, view your portfolio, analyze market trends, and control the bot's operations.
+
+## How Does It Work? (A Simplified View)
+
+NumerusX is like a team of specialized robots working together:
+
+1.  **The Data Gatherer (`MarketDataProvider`)**: This component is constantly watching the market, collecting price information, news, and other relevant data from various exchanges and sources on the Solana network (like Jupiter and DexScreener).
+2.  **The Analyst (`AnalyticsEngine` & `PredictionEngine`)**: This is where the "smarts" come in. It uses the collected data to:
+    *   Identify market trends and patterns.
+    *   Employ AI and machine learning to predict potential price changes.
+    *   Gauge market sentiment (e.g., is the general feeling about a token positive or negative?).
+    *   Understand the underlying causes of market movements.
+3.  **The Strategist (`StrategyFramework` & individual strategy files)**: You define your trading rules here. Based on the Analyst's insights, the Strategist decides when to suggest a buy or sell action. You can have multiple strategies, and the system can even learn which ones work best under different market conditions.
+4.  **The Risk Manager (`RiskManager`)**: Before any action is taken, this component assesses the potential risks. It decides how much to trade based on your predefined risk tolerance and current market volatility, aiming to protect your capital.
+5.  **The Security Guard (`Security`)**: This module checks tokens for red flags, helping to avoid scams or highly risky assets.
+6.  **The Executor (`TradingEngine`)**: Once a decision is made and deemed safe, this component carries out the actual trades on the Solana network, interacting with Decentralized Exchanges (DEXs). It aims for the best possible execution price and handles the technicalities of the transaction.
+7.  **The Record Keeper (`Database`)**: All trades, decisions, and important events are logged for review and analysis.
+8.  **The Control Panel (`Dashboard` - in progress)**: This will be your window into NumerusX, allowing you to monitor everything, make adjustments, and see your results.
+
+## Project Structure
 
 ```
 NumerusX/
-├── strategy_framework.py    # Cadre pour développer des stratégies de trading
-├── strategy_evaluator.py    # Outils d'évaluation des stratégies
-├── strategy_debug.py        # Utilitaires de débogage avancé pour stratégies
-├── market_data.py           # Fournisseur de données de marché
-├── prediction_engine.py     # Moteur de prédiction basé sur l'apprentissage automatique
-├── security.py              # Vérifications de sécurité pour les tokens
-├── risk_manager.py          # Gestion des risques et du portefeuille
-└── trading_engine.py        # Moteur d'exécution des ordres
+├── app/
+│   ├── __init__.py
+│   ├── api_routes.py         # FastAPI routes for external interaction (if any)
+│   ├── analytics_engine.py     # Advanced market analysis and feature engineering
+│   ├── config.py             # Centralized configuration management
+│   ├── dashboard.py          # Main NiceGUI dashboard application logic
+│   ├── database.py           # SQLite database interaction and schema
+│   ├── dex_bot.py            # Core bot logic, orchestrates strategies and execution
+│   ├── gui.py                # (Potentially legacy or helper UI components for NiceGUI)
+│   ├── logger.py             # Application-wide logging setup
+│   ├── main.py               # Main entry point for the application
+│   ├── monitoring.py         # System monitoring and performance tracking
+│   ├── prediction_engine.py  # AI/ML models for price/trend prediction & sentiment
+│   ├── risk_manager.py       # Position sizing, portfolio risk controls
+│   ├── strategy_debug.py     # Tools for debugging trading strategies
+│   ├── strategy_evaluator.py # Performance evaluation of trading strategies
+│   ├── strategy_framework.py # Base classes and utilities for creating strategies
+│   ├── wallet.py             # Solana wallet management and key handling
+│   ├── examples/             # Example strategies and usage scenarios
+│   │   └── simple_strategy_example.py
+│   ├── market/               # Market data acquisition and management
+│   │   └── market_data.py    # Unified provider for Jupiter, DexScreener, etc.
+│   ├── security/             # Token security analysis and validation
+│   │   └── security.py
+│   └── trading/              # Trading execution logic
+│       └── trading_engine.py # Interface with Solana DEXs (e.g., Jupiter) for swaps
+├── Docker/
+│   └── docker-compose.yml    # Docker container orchestration
+├── todo/                     # Task lists and planning documents
+├── .gitignore
+├── logo.jpg
+├── README.md
+└── requirements.txt        # Python package dependencies
 ```
 
-## Composants du système
+## Core Components In-Depth
 
-### Strategy Framework
+Here\'s a more detailed look at the key components:
 
-Le cœur du système qui permet de développer des stratégies de trading. Il comprend:
+1.  **`app/config.py` (Configuration Manager)**
+    *   Centralizes all application settings, API keys, trading parameters (slippage, max positions, etc.), and paths.
+    *   Loads settings from environment variables (`.env` file) using `python-dotenv`, providing defaults where applicable.
+    *   Ensures consistent access to configuration throughout the application.
 
-- Classes de base pour les stratégies
-- Types de signaux prédéfinis (BUY, SELL, STRONG_BUY, etc.)
-- Calcul de métriques pour évaluer les performances
-- Mécanismes d'optimisation des paramètres
+2.  **`app/market/market_data.py` (Market Data Provider)**
+    *   Consolidates all external API calls for market data (prices, historical data, token info, liquidity) from sources like Jupiter, DexScreener.
+    *   Implements robust caching (e.g., `TTLCache`) to reduce API call frequency and latency.
+    *   Handles API rate limits gracefully using `tenacity` for retries with exponential backoff.
+    *   Provides fallback mechanisms if one data source fails.
+    *   Standardizes data formats received from different APIs into a consistent internal representation.
 
-Exemples de stratégies incluses:
-- Moving Average Crossover
-- RSI (Relative Strength Index)
-- Volatility Breakout
-- Pattern Recognition
-- Sentiment-Based
+3.  **`app/analytics_engine.py` (Market Analytics Engine)**
+    *   Performs advanced analysis on raw market data to generate features for strategies and prediction models.
+    *   Calculates various technical indicators (RSI, MACD, Bollinger Bands, ATR, etc.).
+    *   May include on-chain analysis capabilities (e.g., tracking whale movements, if APIs permit).
+    *   Capable of multi-timeframe analysis to identify correlations and divergences.
+    *   Can identify support/resistance levels using volume profiles or other techniques.
 
-### Evaluation et Débogage
+4.  **`app/prediction_engine.py` (AI Prediction Engine)**
+    *   Houses Machine Learning (ML) and AI models for forecasting price movements, market trends, and classifying market regimes (trending, ranging, volatile).
+    *   May integrate Natural Language Processing (NLP) for sentiment analysis from social media or news feeds.
+    *   Manages model training, evaluation, and persistence (e.g., using `scikit-learn`, `PyTorch`, `joblib`).
+    *   Can employ reinforcement learning techniques to optimize strategy parameters over time.
 
-Outils permettant d'analyser en profondeur les performances des stratégies:
+5.  **`app/strategy_framework.py` (Strategy Framework)**
+    *   Provides base classes (`Strategy`, `Signal`) and a structured way to define, test, and manage various trading strategies.
+    *   Allows for pluggable strategies, making it easy to add new ones.
+    *   `strategy_evaluator.py` is used to backtest strategies against historical data and calculate performance metrics (Sharpe ratio, ROI, drawdown).
+    *   `strategy_debug.py` offers tools to inspect and debug strategy behavior.
 
-- Métriques de performance complètes (ROI, ratio de Sharpe, drawdown, etc.)
-- Visualisations détaillées (courbes d'équité, distributions des rendements)
-- Rapport de débogage avec timeline de signaux et analyse d'erreurs
-- Recommandations d'amélioration automatiques
+6.  **`app/security/security.py` (Token Security Analyzer)**
+    *   Performs due diligence on Solana tokens before trading.
+    *   Validates token addresses and checks for known scam patterns or rug pull indicators.
+    *   Analyzes token liquidity, holder distribution, and other on-chain metrics to assess risk.
+    *   Aims to protect the bot from interacting with malicious or extremely high-risk assets.
 
-### Gestion des risques
+7.  **`app/risk_manager.py` (Risk Management System)**
+    *   Implements crucial risk controls for trading operations.
+    *   Calculates optimal position sizes based on methodologies like the Kelly Criterion, adjusted for current volatility and account size.
+    *   Manages overall portfolio exposure, potentially considering asset correlations.
+    *   Can enforce dynamic stop-loss and take-profit levels based on market volatility (e.g., using ATR).
+    *   May include circuit breakers to halt trading during severe drawdowns.
 
-Système avancé de gestion des risques pour protéger votre capital:
+8.  **`app/trading/trading_engine.py` (Trading Execution Engine)**
+    *   Handles the direct interaction with Solana Decentralized Exchanges (DEXs), primarily Jupiter, to execute trades.
+    *   Constructs, signs, and submits transactions to the Solana network.
+    *   Manages transaction fee estimation (including priority fees) to optimize execution.
+    *   Includes robust error handling and retry mechanisms for transaction submissions, accounting for network congestion or DEX-specific issues.
+    *   Aims for best price execution and manages slippage according to configured limits.
+    *   May implement advanced order types (limit orders, DCA) if supported by the DEX APIs.
 
-- Calcul de taille de position optimale avec critère de Kelly
-- Contrôle des corrélations entre actifs
-- Limites d'exposition dynamiques
-- Mécanisme de "circuit breaker" en cas de drawdown important
+9.  **`app/dex_bot.py` (Core Bot Orchestrator)**
+    *   The central "brain" that ties all other components together.
+    *   Runs the main trading loop: fetches market data, gets analysis and predictions, applies the selected strategy, checks risk, and executes trades via the `TradingEngine`.
+    *   Manages the state of active trades and the portfolio.
+    *   Interfaces with the `Database` to log trades and decisions.
 
-### Prédiction de prix
+10. **`app/database.py` (Database Interface)**
+    *   Manages the persistence of data, such as trade history, blacklisted tokens, strategy performance metrics, and configuration settings.
+    *   Uses SQLite for local data storage.
+    *   Handles database initialization and potential schema migrations.
 
-Moteur de prédiction basé sur l'apprentissage automatique:
+11. **`app/dashboard.py` & `app/gui.py` (User Interface)**
+    *   Provides a web-based dashboard (using `NiceGUI`) for users to monitor the bot\'s activity, view portfolio performance, analyze market data, and control bot operations (start/stop, adjust settings).
+    *   Aims for real-time updates and clear visualizations. `gui.py` might contain older or helper UI elements.
 
-- Classification automatique du régime de marché
-- Sélection dynamique du modèle selon le régime
-- Analyse de sentiment intégrée depuis Twitter, Discord, Reddit
-- Optimisation par apprentissage par renforcement
+12. **`app/main.py` (Application Entry Point)**
+    *   Initializes and starts the core application components, including the `DexBot` and the `Dashboard`.
 
-### Sécurité
+This structure is designed to be modular, allowing for independent development and testing of each component, while facilitating complex interactions to achieve intelligent and automated trading.
 
-Module de vérification des tokens pour prévenir les risques:
+## The Goal: Intelligent and Secure Crypto Trading
 
-- Validation des adresses et contrats
-- Détection de modèles de fraude et d'arnaque
-- Vérification de la liquidité et de sa profondeur
-- Analyse des détenteurs et de la distribution des tokens
+NumerusX is an ambitious project that combines data analysis, artificial intelligence, and robust engineering to provide a powerful tool for navigating the cryptocurrency markets. It's designed for users who want to go beyond manual trading and leverage technology to enhance their trading performance and manage risks effectively.
 
-## Comment utiliser le système
+Whether you're an experienced trader looking to automate complex strategies or someone keen to explore the potential of AI in finance, NumerusX offers a comprehensive platform to experiment, learn, and trade with greater insight.
 
-### Installation des dépendances
+## Disclaimer
 
-```bash
-pip install numpy pandas matplotlib seaborn scikit-learn torch aiohttp
-```
-
-### Création d'une stratégie simple
-
-```python
-from strategy_framework import Strategy, Signal, SignalType
-
-class SimpleMAStrategy(Strategy):
-    """Stratégie simple de croisement de moyennes mobiles."""
-    
-    def __init__(self, name: str, timeframes: List[str], params: Dict[str, Any] = None):
-        default_params = {
-            "fast_ma": 10,
-            "slow_ma": 30
-        }
-        actual_params = default_params.copy()
-        if params:
-            actual_params.update(params)
-            
-        super().__init__(name, timeframes, actual_params)
-        
-    async def generate_signal(self, token_address: str, price_data: pd.DataFrame, timeframe: str) -> Signal:
-        # Calculer les moyennes mobiles
-        fast_ma = price_data['close'].rolling(window=self.params["fast_ma"]).mean()
-        slow_ma = price_data['close'].rolling(window=self.params["slow_ma"]).mean()
-        
-        # Obtenir les valeurs les plus récentes
-        latest_fast = fast_ma.iloc[-1]
-        latest_slow = slow_ma.iloc[-1]
-        prev_fast = fast_ma.iloc[-2]
-        prev_slow = slow_ma.iloc[-2]
-        
-        # Déterminer le type de signal
-        if prev_fast < prev_slow and latest_fast > latest_slow:
-            signal_type = SignalType.BUY
-            confidence = 0.8
-        elif prev_fast > prev_slow and latest_fast < latest_slow:
-            signal_type = SignalType.SELL
-            confidence = 0.8
-        else:
-            signal_type = SignalType.NEUTRAL
-            confidence = 0.5
-            
-        # Créer et retourner le signal
-        signal = Signal(
-            type=signal_type,
-            confidence=confidence,
-            timestamp=time.time(),
-            token_address=token_address,
-            timeframe=timeframe,
-            strategy_name=self.name,
-            metadata={
-                "fast_ma": latest_fast,
-                "slow_ma": latest_slow
-            }
-        )
-        
-        return signal
-```
-
-### Exécution d'un backtest
-
-```python
-import asyncio
-from strategy_framework import BacktestEngine
-from strategy_evaluator import StrategyEvaluator
-
-async def run_backtest():
-    # Créer une stratégie
-    strategy = SimpleMAStrategy(
-        name="SimpleMA_10_30", 
-        timeframes=["1h", "4h"]
-    )
-    
-    # Charger les données historiques
-    price_data = {
-        "1h": pd.read_csv("historical_data_1h.csv"),
-        "4h": pd.read_csv("historical_data_4h.csv")
-    }
-    
-    # Exécuter le backtest
-    backtest_engine = BacktestEngine()
-    result = await backtest_engine.run_backtest(
-        strategy, 
-        price_data, 
-        "TokenXYZ123"
-    )
-    
-    # Évaluer les performances
-    evaluator = StrategyEvaluator()
-    evaluation = await evaluator.evaluate_strategy(
-        strategy,
-        price_data, 
-        "TokenXYZ123"
-    )
-    
-    # Générer un rapport
-    report = evaluator.generate_report(evaluation)
-    print(f"Rapport généré: {report}")
-
-# Exécuter le backtest
-asyncio.run(run_backtest())
-```
-
-### Débogage d'une stratégie
-
-```python
-from strategy_debug import StrategyDebugger
-
-async def debug_strategy():
-    # Créer une stratégie
-    strategy = SimpleMAStrategy(
-        name="SimpleMA_Debug", 
-        timeframes=["1h"]
-    )
-    
-    # Charger les données
-    price_data = {"1h": pd.read_csv("historical_data_1h.csv")}
-    
-    # Déboguer la stratégie
-    debugger = StrategyDebugger()
-    debug_result = await debugger.debug_strategy(
-        strategy,
-        price_data,
-        "TokenXYZ123"
-    )
-    
-    # Analyser les problèmes
-    analysis = debugger.analyze_strategy_problems(debug_result)
-    
-    # Afficher les recommandations
-    for recommendation in analysis["recommendations"]:
-        print(f"- {recommendation}")
-
-# Exécuter le débogage
-asyncio.run(debug_strategy())
-```
-
-## Contributions
-
-Les contributions sont les bienvenues! Voici comment vous pouvez contribuer:
-
-1. Fork du projet
-2. Créer une branche pour votre fonctionnalité (`git checkout -b feature/amazing-feature`)
-3. Commit de vos changements (`git commit -m 'Add amazing feature'`)
-4. Push vers la branche (`git push origin feature/amazing-feature`)
-5. Ouvrir une Pull Request
-
-## License
-
-Ce projet est sous licence MIT - voir le fichier LICENSE pour plus de détails.
-
-## Avertissement
-
-Ce logiciel est fourni à des fins éducatives et de recherche uniquement. Le trading de cryptomonnaies comporte des risques significatifs et peut entraîner des pertes financières importantes. Utilisez ce système à vos propres risques.
+Trading cryptocurrencies involves significant risk and can result in substantial financial losses. NumerusX is provided for educational and research purposes. Any actions taken based on the software's outputs are at your own risk. Always do your own research and consider consulting with a financial advisor.
 

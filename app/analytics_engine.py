@@ -1,7 +1,7 @@
 import pandas as pd
 import talib
 import numpy as np
-from typing import Dict
+from typing import Dict, List, Optional, Union
 import logging
 from app.config import Config
 
@@ -9,37 +9,49 @@ class AdvancedTradingStrategy:
     def __init__(self):
         self.logger = logging.getLogger('Analytics')
         
-    def analyze(self, data: Dict) -> Dict:
-        """Analyse multi-source (Jupiter + DexScreener)"""
+    def analyze(self, historical_data_list: List[Dict], current_pair_metrics: Optional[Dict] = None) -> Dict:
+        """Analyse multi-source, now taking historical list and optional current pair metrics."""
         try:
-            df = self._prepare_dataframe(data)
-            if df.empty or len(df) < 24:
-                return {'error': 'Données insuffisantes'}
-                
+            # _prepare_dataframe expects a list of dicts for historical data
+            df = self._prepare_dataframe(historical_data_list)
+            if df.empty or len(df) < 24: # Or some other meaningful threshold
+                return {'error': 'Données historiques insuffisantes pour l\'analyse'}
+            
+            # Use current_pair_metrics for volume analysis if available
+            volume_quality = self._volume_analysis(current_pair_metrics if current_pair_metrics else {})
+
             return {
                 'momentum': self._momentum_score(df),
-                'volume_quality': self._volume_analysis(data),
+                'volume_quality': volume_quality,
                 'market_structure': self._market_structure(df),
                 'risk': self._risk_score(df)
             }
         except Exception as e:
-            self.logger.error(f"Erreur analyse: {str(e)}")
+            self.logger.error(f"Erreur analyse: {str(e)}", exc_info=True)
             return {'error': str(e)}
 
-    def _prepare_dataframe(self, data: Dict) -> pd.DataFrame:
-        """Convertit les formats API en DataFrame de manière robuste."""
-        # Jupiter API format
-        if isinstance(data, dict) and 'priceHistory' in data:
+    def _prepare_dataframe(self, data: Union[List[Dict], Dict]) -> pd.DataFrame:
+        """Convertit les formats API en DataFrame de manière robuste.
+        Now primarily expects a list of historical data dicts.
+        """
+        if isinstance(data, list):
+            # This is the expected format from MarketDataProvider.get_historical_prices
+            df = pd.DataFrame(data)
+            # Ensure required columns exist
+            expected_cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            for col in expected_cols:
+                if col not in df.columns:
+                    # Add missing column with NaNs or default values if appropriate
+                    df[col] = np.nan 
+            return df
+        elif isinstance(data, dict) and 'priceHistory' in data: # Legacy handling
             return pd.DataFrame(data['priceHistory'])
-        # DexScreener API format
-        elif isinstance(data, dict) and 'pairs' in data and len(data.get('pairs', [])) > 0:
+        elif isinstance(data, dict) and 'pairs' in data and len(data.get('pairs', [])) > 0: # Legacy handling
             pairs_data = data.get('pairs', [{}])[0]
             if 'priceHistory' in pairs_data:
                 return pd.DataFrame(pairs_data['priceHistory'])
-        # Generic format handling
-        elif isinstance(data, list):
-            return pd.DataFrame(data)
-        # Fallback empty DataFrame with expected columns
+        
+        self.logger.warning(f"Format de données inattendu pour _prepare_dataframe: {type(data)}")
         return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
 
     def _momentum_score(self, df: pd.DataFrame) -> float:
@@ -53,13 +65,24 @@ class AdvancedTradingStrategy:
             self.logger.error(f"Erreur calcul momentum: {str(e)}")
             return 0.0
 
-    def _volume_analysis(self, data: Dict) -> int:
-        """Combine Jupiter volume24h et DexScreener volume.h24"""
+    def _volume_analysis(self, pair_data: Dict) -> int:
+        """Analyse le volume à partir des données actuelles de la paire (standardisées).
+        Utilise 'liquidity_usd' et 'volume_h24' du format standardisé.
+        """
         try:
-            jup_volume = data.get('volume24h', 0)
-            dex_volume = data.get('volume', {}).get('h24', 0)
-            total = jup_volume + dex_volume
-            return 1 if total > Config.MIN_LIQUIDITY else 0
+            # Data from MarketDataProvider.get_token_pairs (standardized format)
+            # It should have 'liquidity_usd' and 'volume_h24'
+            liquidity = pair_data.get('liquidity_usd', 0.0) 
+            volume_24h = pair_data.get('volume_h24', 0.0)
+
+            # The original logic used Config.MIN_LIQUIDITY_USD for volume check threshold.
+            # This seems like a confusion between liquidity and volume.
+            # Let's assume the check is against MIN_LIQUIDITY_USD for liquidity.
+            # And perhaps a separate check for volume if needed.
+            # For now, replicating the spirit: if liquidity > threshold, quality = 1
+            
+            # Using MIN_LIQUIDITY_USD as a threshold for *liquidity* quality
+            return 1 if liquidity > Config.MIN_LIQUIDITY_USD else 0
         except Exception as e:
             self.logger.error(f"Erreur analyse volume: {str(e)}")
             return 0
@@ -90,7 +113,7 @@ class AdvancedTradingStrategy:
             return 'hold'
             
         try:
-            if (analysis['momentum'] > Config.TRADE_THRESHOLD 
+            if (analysis['momentum'] > Config.TRADE_CONFIDENCE_THRESHOLD
                 and analysis['volume_quality'] == 1 
                 and analysis['market_structure'] > 0.6):
                 return 'strong_buy'

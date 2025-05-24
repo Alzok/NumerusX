@@ -4,10 +4,10 @@ import signal
 import sys
 from nicegui import ui
 from logging.handlers import RotatingFileHandler
-from dex_bot import DexBot
-from gui import TradingDashboard
-from config import Config
-from logger import DexLogger
+from app.dex_bot import DexBot
+from app.gui import TradingDashboard
+from app.config import Config
+from app.logger import DexLogger
 
 def configure_logging():
     """Configuration avancée du système de logging"""
@@ -20,7 +20,7 @@ def configure_logging():
 
     # Handler pour fichiers logs
     file_handler = RotatingFileHandler(
-        'data/numerusx.log',
+        Config.get_log_file_path(),
         maxBytes=10*1024*1024,  # 10MB
         backupCount=5,
         encoding='utf-8'
@@ -73,7 +73,7 @@ async def main():
         async def update_loop():
             while True:
                 dashboard.update_dashboard()
-                await asyncio.sleep(Config.UI_UPDATE_INTERVAL)
+                await asyncio.sleep(Config.UI_UPDATE_INTERVAL_SECONDS)
 
         asyncio.create_task(update_loop())
 

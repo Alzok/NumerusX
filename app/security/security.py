@@ -9,7 +9,11 @@ import aiohttp
 import sqlite3
 from dataclasses import dataclass
 import numpy as np
-from market.market_data import MarketDataProvider
+from app.config import Config
+from app.market.market_data import MarketDataProvider
+import jwt
+from datetime import datetime, timedelta
+from passlib.context import CryptContext
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -17,6 +21,57 @@ logger = logging.getLogger("security")
 
 # Regex pour valider les adresses Solana (format Base58)
 SOLANA_ADDRESS_PATTERN = re.compile(r'^[1-9A-HJ-NP-Za-km-z]{32,44}$')
+
+# Password hashing context
+# TODO: Consider making rounds/schemes configurable if needed via Config
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+class Security:
+    """Handles API authentication (JWT) and password management."""
+
+    def __init__(self):
+        self.secret_key = Config.JWT_SECRET_KEY
+        self.algorithm = "HS256" # Standard algorithm for JWT
+        self.expiration_seconds = Config.JWT_EXPIRATION
+
+    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
+        """Verifies a plain password against a hashed one."""
+        try:
+            return pwd_context.verify(plain_password, hashed_password)
+        except Exception as e:
+            logger.error(f"Error verifying password: {e}")
+            return False
+
+    def get_password_hash(self, password: str) -> str:
+        """Hashes a password."""
+        return pwd_context.hash(password)
+
+    def create_token(self, data: dict) -> str:
+        """Creates a JWT token."""
+        to_encode = data.copy()
+        expire = datetime.utcnow() + timedelta(seconds=self.expiration_seconds)
+        to_encode.update({"exp": expire})
+        encoded_jwt = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
+        return encoded_jwt
+
+    def verify_token(self, token: str) -> Tuple[bool, str]:
+        """Verifies a JWT token. Corresponds to task 1.6 requirement for API auth.
+        Returns (is_valid, message_or_userid).
+        """
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            # For now, just confirming token is valid and not expired.
+            # logger.info(f"Token valid for user_id: {payload.get('user_id')}")
+            return True, payload.get("user_id", "Token valid") # Or return payload itself if needed
+        except jwt.ExpiredSignatureError:
+            logger.warning("Token has expired")
+            return False, "Token has expired"
+        except jwt.InvalidTokenError as e:
+            logger.error(f"Invalid token: {e}")
+            return False, "Invalid token"
+        except Exception as e:
+            logger.error(f"Token verification error: {e}")
+            return False, "Token verification failed"
 
 @dataclass
 class SecurityRisk:
