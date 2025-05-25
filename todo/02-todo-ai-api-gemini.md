@@ -10,7 +10,7 @@
 ## Modèle d'IA Sélectionné
 
 * **API**: Google AI (via Vertex AI ou Google AI Studio)
-* **Modèle**: Gemini 2.5 Flash Preview (ou le nom exact du modèle au moment de l'implémentation, ex: "gemini-2.5-flash-preview-XXXX")
+* **Modèle Cible Primaire**: Un modèle de la famille Gemini Flash (ex: `gemini-1.5-flash-latest` ou l'équivalent spécifique via Vertex AI). Le nom exact sera défini dans `Config.GEMINI_MODEL_NAME`.
 
 ## Phase 1: Configuration et Installation Initiale
 
@@ -19,7 +19,7 @@
 -   **Fichier Concerné**: `app/config.py`
 -   **Détails**:
     -   [ ] Ajouter `GOOGLE_API_KEY` à la classe `Config`. Charger depuis les variables d'environnement.
-    -   [ ] Ajouter `GEMINI_MODEL_NAME` (ex: "gemini-2.5-flash-preview-XXXX") à `Config`.
+    -   [ ] Ajouter `GEMINI_MODEL_NAME` (ex: "gemini-1.5-flash-latest", ou un identifiant de modèle Vertex AI spécifique comme "projects/YOUR_PROJECT_ID/locations/YOUR_REGION/publishers/google/models/gemini-1.5-flash-001") à `Config`. Ce sera le nom exact passé à l'API.
     -   [ ] Ajouter `GEMINI_API_TIMEOUT_SECONDS` (ex: 15-25 secondes, Gemini Flash est conçu pour être rapide) à `Config`.
     -   [ ] Ajouter `GEMINI_MAX_TOKENS_INPUT` (ex: 4096) à `Config` et l'utiliser dans `GeminiClient` pour la configuration de génération.
     -   [ ] S'assurer que la clé API n'est pas commitée (utilisation de `.env` et `python-dotenv`).
@@ -87,8 +87,18 @@
         -   Appeler `self.gemini_client.get_decision(prompt_text)`.
         -   Parser la réponse texte du LLM (qui devrait être un JSON structuré comme demandé dans le prompt) pour extraire la décision de trade et le raisonnement.
 
+    - [ ] **Gestion des Erreurs et Continuité du Cycle par `DexBot`**:
+        - `GeminiClient` intercepte les erreurs API brutes (timeouts, rate limits, erreurs de contenu Gemini) et les encapsule en erreurs structurées (ex: `GeminiAPIError` avec des détails) ou retourne un objet de décision indiquant l'échec.
+        - `AIAgent` reçoit cette erreur structurée ou l'objet d'échec. Il peut tenter une logique de fallback interne simple (ex: HOLD par défaut) ou propager l'échec.
+        - `DexBot` reçoit la décision finale de `AIAgent` (succès ou échec avec détails). En cas d'échec persistant de l'IA, `DexBot` doit journaliser l'erreur de manière critique et peut décider de :
+            - Sauter le cycle de trading actuel.
+            - Augmenter l'intervalle entre les cycles.
+            - Entrer dans un mode "dégradé" en attendant la résolution du problème avec l'API Gemini. Ce mode dégradé consistera à **ne pas initier de nouveaux trades** et à uniquement gérer les positions existantes (ex: suivre les stop-loss / take-profit s'ils ont été définis lors d'une décision IA précédente valide).
+            - Envoyer une alerte à l'utilisateur via l'UI et potentiellement d'autres canaux (email, etc.).
+        - La priorité est d'assurer la continuité des opérations du bot et la préservation du capital, même si le module IA est temporairement indisponible.
+
 ### Tâche 3.2: Conception du Prompt Optimisé pour Gemini 2.5 Flash (Coût et Efficacité)
--   **Objectif**: Créer un prompt très structuré et concis pour Gemini 2.5 Flash, afin d'obtenir des réponses précises tout en minimisant le nombre de tokens d'entrée et de sortie.
+-   **Objectif**: Créer un prompt très structuré et concis pour le modèle Gemini Flash sélectionné (via `Config.GEMINI_MODEL_NAME`), afin d'obtenir des réponses précises tout en minimisant le nombre de tokens d'entrée et de sortie.
 -   **Fichier Concerné**: Logique de construction du prompt dans `app/ai_agent.py`.
 -   **Détails**:
     -   [ ] **Rôle et Contexte Principal**: Définir clairement que l'IA est un agent de trading pour NumerusX sur Solana, spécialisé dans l'analyse de multiples sources de données pour prendre des décisions d'achat, de vente ou de conservation.
@@ -144,16 +154,90 @@
             Prioritize capital preservation. If data is conflicting or insufficient for a high-confidence trade, prefer HOLD.
             Be concise in your reasoning.
             ```
-    -   [ ] **Instructions de Format de Sortie (Crucial pour le Coût)**:
-        -   Demander explicitement une sortie JSON structurée et concise. Préciser les champs attendus et leurs types. Cela réduit le nombre de tokens de sortie et facilite le parsing.
-        -   Limiter la longueur du champ "reasoning" si nécessaire (ex: `max_output_tokens` dans `generation_config`).
-    -   [ ] **Stratégie "Single Shot"**:
-        -   Assurer que `DexBot` collecte et agrège **toutes** les informations nécessaires **avant** de construire le prompt.
-        -   L'objectif est d'obtenir une décision et un raisonnement complets en un seul appel à l'API Gemini pour chaque cycle de décision du bot. Pas de conversation ou d'appels multiples pour une seule décision.
-    -   [ ] **Minimisation des Tokens d'Entrée**:
-        -   Utiliser des abréviations standard si possible.
-        -   Fournir des valeurs numériques directement, éviter les phrases longues pour les données.
-        -   Éliminer toute information redondante ou non essentielle à la prise de décision immédiate.
+    -   [ ] **Structure Détaillée des `aggregated_inputs` (Exemple)**:
+        -   L'objet `aggregated_inputs` transmis à `AIAgent.decide_trade()` sera un dictionnaire Python. Pour la construction du prompt Gemini, ce dictionnaire sera sérialisé en JSON (ou formaté en une chaîne de caractères structurée similaire).
+        -   Voici une proposition de structure (à affiner) :
+            ```python
+            # Exemple de structure pour aggregated_inputs
+            aggregated_inputs = {
+                "timestamp_utc": "2023-10-27T10:30:00Z",
+                "target_pair": { # Informations spécifiques à la paire envisagée
+                    "symbol": "SOL/USDC",
+                    "input_mint": "So11111111111111111111111111111111111111112",
+                    "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+                },
+                "market_data": { # Fourni par MarketDataProvider
+                    "current_price": 165.30,
+                    "recent_ohlcv_1h": [ # Liste d'objets OHLCV pour la dernière heure
+                        {"t": 1698397200, "o": 165.0, "h": 165.5, "l": 164.8, "c": 165.3, "v": 10000},
+                        # ... autres bougies ...
+                    ],
+                    "liquidity_depth_usd": 25000000, # Profondeur du carnet d'ordres ou du pool LP
+                    "recent_trend_1h": "UPWARD", # Peut être calculé ou issu d'une analyse
+                    "key_support_resistance": {
+                        "support_1": 160.00,
+                        "resistance_1": 170.00
+                    },
+                    "volatility_1h_atr_percentage": 0.015 # 1.5% ATR sur 1h
+                },
+                "signal_sources": [ # Liste des outputs des stratégies/analytics_engine
+                    {
+                        "source_name": "MomentumStrategy_1h_RSI_MACD",
+                        "signal": "STRONG_BUY", # Ou "NEUTRAL", "SELL", etc.
+                        "confidence": 0.85,
+                        "indicators": {
+                            "rsi_14": 68,
+                            "macd_signal_strength": 0.7,
+                            "bollinger_position": "NEAR_UPPER_BAND" # Ex: "NEAR_UPPER", "MIDDLE", "NEAR_LOWER"
+                        },
+                        "reasoning_snippet": "RSI bullish, MACD crossover positive."
+                    },
+                    {
+                        "source_name": "AdvancedAnalytics_VolumeSpike",
+                        "signal": "POTENTIAL_REVERSAL_SOON",
+                        "confidence": 0.60,
+                        "details": {"volume_zscore_5m": 3.5},
+                        "reasoning_snippet": "Recent 5m volume spike suggests exhaustion."
+                    }
+                    # ... autres sources de signaux ...
+                ],
+                "prediction_engine_outputs": { # Fourni par PredictionEngine
+                    "price_prediction_4h": {
+                        "target_price_min": 168.00,
+                        "target_price_max": 172.00,
+                        "confidence": 0.75,
+                        "model_name": "RandomForest_v2"
+                    },
+                    "market_regime_1h": "VOLATILE_TRENDING", # Ex: "TRENDING_UP", "TRENDING_DOWN", "RANGING", "VOLATILE"
+                    "sentiment_analysis": {
+                        "overall_score": 0.6, # Sur une échelle de -1 (très négatif) à 1 (très positif)
+                        "dominant_sentiment": "POSITIVE",
+                        "source_summary": "Twitter positive, Reddit neutral",
+                        "volume_of_mentions": "HIGH"
+                    }
+                },
+                "risk_manager_inputs": { # Fourni par RiskManager
+                    "max_exposure_per_trade_percentage": 0.02, # 2%
+                    "current_portfolio_value_usd": 10000.00,
+                    "available_capital_usdc": 4000.00,
+                    "max_trade_size_usd": 200.00, # Calculé: 2% de 10000
+                    "overall_portfolio_risk_level": "MODERATE" # Ex: "LOW", "MODERATE", "HIGH"
+                },
+                "portfolio_manager_inputs": { # Fourni par PortfolioManager
+                    "current_positions": [
+                        # {"symbol": "BTC/USDC", "amount": 0.1, "entry_price": 30000, "current_pnl_usd": 500},
+                    ],
+                    "total_pnl_realized_24h_usd": 150.00
+                },
+                "security_checker_inputs": { # Fourni par SecurityChecker
+                    "token_security_score_sol": 0.9, # Score pour SOL (0 à 1)
+                    "recent_security_alerts_sol": [] # Liste d'alertes
+                }
+            }
+            ```
+
+    -   [ ] **Format de Sortie de l'AIAgent (Confirmation)**:
+        -   Il est confirmé que le format de sortie JSON pour Gemini défini précédemment dans cette tâche (avec les champs `decision`, `token_pair`, `amount_usd`, `confidence`, `stop_loss_price`, `take_profit_price`, `reasoning`) est bien le format définitif que `AIAgent` s'attend à recevoir et à parser. `DexBot` utilisera ensuite cette structure pour initier des actions via le `TradeExecutor`.
 
 ### Tâche 3.3: Parsing Robuste et Validation de la Réponse JSON de Gemini
 -   **Objectif**: Extraire de manière fiable la décision structurée de la réponse texte de Gemini.
@@ -171,10 +255,12 @@
 
               class TradeDecision(BaseModel):
                   decision: Literal["BUY", "SELL", "HOLD"]
-                  token_pair: str
-                  amount_usd: Optional[confloat(gt=0)]
+                  token_pair: str # ex: "SOL/USDC"
+                  amount_usd: Optional[confloat(gt=0)] = None
                   confidence: confloat(ge=0, le=1)
-                  reasoning: constr(max_length=500)
+                  stop_loss_price: Optional[confloat(gt=0)] = None
+                  take_profit_price: Optional[confloat(gt=0)] = None
+                  reasoning: constr(min_length=10, max_length=500) # Raisonnement concis
               ```
         -   [ ] Gérer les cas où le LLM retourne un JSON malformé ou incomplet. Implémenter des reintentions avec un prompt légèrement modifié (ex: "Please ensure output is valid JSON.") si cela arrive occasionnellement, ou un fallback sûr (HOLD).
         -   [ ] Convertir la décision parsée en l'objet `Ordre de Trade Final` utilisé par `DexBot`.
@@ -198,9 +284,12 @@
     -   [ ] Utiliser `tenacity` pour implémenter des reintentions avec backoff exponentiel pour les appels à `gemini_client.get_decision` en cas d'erreurs réseau, de `DeadlineExceeded`, ou `ResourceExhausted`.
     -   [ ] Si l'API Gemini retourne une erreur indiquant un problème avec le prompt (ex: contenu bloqué malgré les `safety_settings`), `AIAgent` pourrait tenter de reformuler légèrement le prompt ou de réduire la quantité de données textuelles sensibles.
     -   [ ] En cas d'échecs répétés ou si la réponse n'est pas parsable après reintentions, `AIAgent` doit déclencher une stratégie de fallback :
-        -   Option 1: Utiliser une logique de décision simplifiée interne (ex: basée sur `AdvancedTradingStrategy` uniquement).
-        -   Option 2: Émettre un signal HOLD avec un niveau de confiance faible et journaliser l'incident de manière critique.
-        -   Option 3 (Plus avancée): Utiliser un modèle LLM local plus petit comme fallback (si disponible et pertinent).
+        -   **Stratégie de Fallback Principale et Explicite**: 
+            -   `AIAgent` émettra une décision `{"decision": "HOLD", "token_pair": "<TARGET_PAIR>", "amount_usd": null, "confidence": 0.1, "stop_loss_price": null, "take_profit_price": null, "reasoning": "AIAgent (Gemini API) failed to provide a decision after multiple attempts or response was unparsable. Defaulting to HOLD to ensure safety. Manual review advised."}`.
+            -   Cette décision "HOLD" sera journalisée de manière critique.
+            -   `DexBot` traitera cette décision HOLD comme une absence d'opportunité de trade pour le cycle actuel.
+        -   **Pas de Fallback vers une Stratégie Secondaire Automatisée Initialement**: Pour éviter une complexité additionnelle et des comportements imprévus, le système ne basculera pas automatiquement vers une stratégie de trading algorithmique alternative (ex: `MomentumStrategy`) si Gemini échoue. La priorité est la sécurité et l'alerte pour une intervention humaine ou une résolution du problème API. Une telle bascule pourrait être envisagée dans une phase ultérieure avec des tests rigoureux.
+        -   L'objectif est que `DexBot` continue son cycle de vie (collecte de données, etc.) mais s'abstienne de trader activement si l'IA n'est pas fiable, tout en informant l'utilisateur.
 
 ### Tâche 4.3: Tests d'Intégration et de Robustesse
 -   **Objectif**: Valider l'intégration de l'API Gemini et la fiabilité des décisions.
@@ -213,18 +302,18 @@
 
 ## Phase 5: Intégration UI et Monitoring des Coûts
 
-### Tâche 5.1: Affichage des Décisions et Raisonnements IA dans le Dashboard
+### Tâche 5.1: Affichage des Décisions et Raisonnements IA dans le Dashboard (`numerusx-ui/`)
 -   **Objectif**: Fournir à l'utilisateur une transparence sur les décisions prises par l'agent IA.
--   **Fichier Concerné**: `app/dashboard.py`
+-   **Fichier Concerné**: `numerusx-ui/` (et ses composants, en s'appuyant sur `todo/01-todo-ui.md`)
 -   **Détails**:
     -   [ ] Modifier `EnhancedDatabase` pour stocker le raisonnement de l'IA et les principaux inputs qui ont mené à la décision.
-    -   [ ] Dans la section "Trading Activity" ou une nouvelle section "AI Agent Log" du `NumerusXDashboard`, afficher :
+    -   [ ] Dans l'application React `numerusx-ui/` (conformément à `todo/01-todo-ui.md`), implémenter les vues nécessaires (ex: section "Trading Activity", "AI Agent Insights") pour afficher :
         -   La décision prise (BUY/SELL/HOLD).
         -   Le token concerné.
         -   La confiance de l'IA.
         -   Le raisonnement textuel fourni par Gemini.
         -   Un résumé des indicateurs clés que l'IA a mentionnés ou qui étaient prédominants dans le prompt.
-    -   [ ] Permettre de visualiser le prompt envoyé à l'IA (peut-être dans une vue "détails avancés" pour le débogage).
+    -   [ ] Permettre de visualiser le prompt envoyé à l'IA (peut-être dans une vue "détails avancés" pour le débogage), via l'UI React.
 
 ### Tâche 5.2: Suivi Actif des Coûts de l'API Gemini
 -   **Objectif**: Surveiller et gérer les coûts associés à l'utilisation de l'API Gemini.

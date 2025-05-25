@@ -25,6 +25,10 @@
 *   **Internationalisation**: i18next avec react-i18next
 *   **Typage**: TypeScript
 
+**Articulation des Technologies UI:**
+
+L'interface utilisateur sera construite avec **React.js** comme bibliothèque fondamentale pour la création de composants interactifs. **ShadCN/UI** fournira une collection de composants d'interface utilisateur réutilisables et esthétiques, qui sont eux-mêmes construits sur Radix UI et stylisés avec **Tailwind CSS**. Tailwind CSS sera également utilisé pour tout stylage utilitaire personnalisé nécessaire au-delà des composants ShadCN/UI. Pour la visualisation de données, **Recharts** sera intégré dans les composants React pour créer des graphiques interactifs. L'état global de l'application, y compris les données temps réel provenant de Socket.io, les préférences utilisateur (comme le thème ou la langue via i18next), et l'état général de l'UI, sera géré par **Redux** (avec Redux Toolkit). Les composants React s'abonneront à l'état Redux (via `useSelector`) et dispatcheront des actions pour le modifier, et les données de cet état (par exemple, les performances du portefeuille) seront passées comme props aux composants Recharts pour affichage.
+
 ## Structure du Projet Frontend (Exemple):
 
 ```
@@ -215,6 +219,126 @@ numerusx-ui/
 -   [ ] **3.8. Dockerisation de l'UI**:
     -   [ ] Créer un `Dockerfile` pour l'application React (multi-stage build avec Nginx pour servir les fichiers statiques).
     -   [ ] Mettre à jour `docker-compose.yml` pour inclure le service frontend.
+
+## Phase 4: Interaction Backend (FastAPI) <-> Frontend (React)
+
+Cette section détaille la communication entre le backend FastAPI et le frontend React, principalement via Socket.io pour les données temps réel et les API REST pour les actions initiées par l'utilisateur.
+
+### 4.1. Communication via Socket.io
+
+Le client Socket.io dans React (`src/lib/socketClient.ts`) se connectera au serveur Socket.io géré par FastAPI.
+
+-   **Événements Émis par le Backend (Exemples) et Gestion par Redux (Frontend)**:
+    -   `connect`: Émis lors de la connexion initiale. Le frontend peut mettre à jour un état `isConnected` dans un slice Redux (ex: `systemSlice`).
+    -   `disconnect`: Émis lors de la déconnexion. Mettre à jour `isConnected`.
+    -   `bot_status_update`:
+        -   **Payload**: `{ "status": "RUNNING" | "STOPPED" | "PAUSED" | "ERROR", "current_cycle": 123, "next_cycle_in_sec": 60, "error_message": "Optional error string" }`
+        -   **Action Redux**: `dispatch(systemSlice.actions.setBotStatus(payload))`
+        -   **Impact UI**: Mise à jour des indicateurs de statut dans le Header et le "Command & Control Center".
+    -   `portfolio_update`:
+        -   **Payload**: `{ "total_value_usd": 12345.67, "pnl_24h_usd": 150.0, "positions": [{"asset": "SOL", "amount": 10.5, "avg_buy_price": 150.0, "current_price": 165.0, "value_usd": 1732.5}], "available_cash_usdc": 4000.0 }`
+        -   **Action Redux**: `dispatch(portfolioSlice.actions.updatePortfolio(payload))`
+        -   **Impact UI**: Mise à jour des graphiques Recharts et des tableaux dans "Portfolio Overview".
+    -   `new_trade_executed`:
+        -   **Payload**: `{ "trade_id": "uuid", "pair": "SOL/USDC", "type": "BUY", "amount_tokens": 1.0, "price_usd": 165.0, "timestamp_utc": "...", "status": "FILLED", "reason_source": "AI_AGENT" | "MANUAL", "ai_reasoning_id": "optional_uuid_to_fetch_reasoning" }`
+        -   **Action Redux**: `dispatch(tradesSlice.actions.addRecentTrade(payload))`
+        -   **Impact UI**: Ajout à la table des trades dans "Trading Activity Center".
+    -   `ai_agent_decision`:
+        -   **Payload**: `{ "decision_id": "uuid", "decision": "BUY" | "SELL" | "HOLD", "token_pair": "SOL/USDC", "confidence": 0.85, "reasoning_snippet": "RSI bullish, MACD crossover.", "timestamp_utc": "...", "full_prompt_id": "optional_uuid_to_fetch_prompt", "key_inputs_summary": { ... } }`
+        -   **Action Redux**: `dispatch(aiAgentSlice.actions.newAiDecision(payload))`
+        -   **Impact UI**: Affichage dans le flux "AI Insights" ou mise à jour d'un log de décisions.
+    -   `market_data_update`:
+        -   **Payload**: `{ "pair": "SOL/USDC", "current_price": 165.30, "volume_24h_usd": 1200000000, "sentiment_score": 0.65 }` (peut être plus granulaire par token ou global)
+        -   **Action Redux**: `dispatch(marketSlice.actions.updateMarketData(payload))`
+        -   **Impact UI**: Mise à jour des graphiques de prix, indicateurs de sentiment dans "Market Intelligence Hub".
+    -   `system_health_update`:
+        -   **Payload**: `{ "service_name": "JupiterApiClient", "status": "OPERATIONAL" | "DEGRADED" | "ERROR", "last_error": "Optional error message"}` (un événement par service ou un snapshot global)
+        -   **Action Redux**: `dispatch(systemSlice.actions.updateServiceHealth(payload))`
+        -   **Impact UI**: Mise à jour des badges de statut dans "System Health & Operations".
+    -   `new_log_entry`:
+        -   **Payload**: `{ "level": "INFO" | "WARNING" | "ERROR", "module": "TradingEngine", "message": "Swap executed successfully.", "timestamp_utc": "..." }`
+        -   **Action Redux**: `dispatch(logsSlice.actions.addLogEntry(payload))`
+        -   **Impact UI**: Ajout à la visualisation des logs.
+-   **Actions Initiées par le Frontend (Exemples)**:
+    -   L'UI peut émettre des événements Socket.io vers le backend pour des actions de contrôle directes (ex: `start_bot`, `stop_bot`, `adjust_strategy_params`). Le backend confirmera ces actions via un événement de retour ou un `bot_status_update`.
+
+### 4.2. Communication via API REST (pour actions et configurations)
+
+Les API REST seront utilisées pour les actions qui ne nécessitent pas une communication bidirectionnelle constante ou pour récupérer des ensembles de données initiaux.
+
+-   **Sécurisation**: Tous les endpoints API et la connexion Socket.io (via le handshake initial) seront sécurisés en utilisant des tokens JWT fournis par Clerk/Auth0. Le backend validera ces tokens.
+-   **Exemples d'Endpoints FastAPI (et Actions Redux correspondantes si nécessaire)**:
+    -   `POST /api/v1/bot/start`: Démarre le bot.
+        -   **Action Redux (Optimiste)**: `dispatch(systemSlice.actions.setBotStatus({ status: "STARTING" }))` en attendant la confirmation via Socket.io.
+    -   `POST /api/v1/bot/stop`: Arrête le bot.
+    -   `POST /api/v1/bot/pause`: Met le bot en pause.
+    -   `GET /api/v1/config`: Récupère la configuration actuelle du bot pour affichage/édition dans le panneau "Settings".
+    -   `POST /api/v1/config`: Met à jour la configuration du bot.
+        -   Nécessite une validation rigoureuse côté backend.
+    -   `POST /api/v1/trades/manual`: Permet à l'utilisateur de soumettre un ordre manuel.
+        -   Le backend valide et transmet au `TradeExecutor`.
+    -   `GET /api/v1/trades/history?limit=50&offset=0`: Récupère l'historique des trades pour affichage paginé.
+    -   `GET /api/v1/ai/decisions/history?limit=50&offset=0`: Récupère l'historique des décisions de l'IA.
+    -   `GET /api/v1/portfolio/snapshot`: Récupère un snapshot complet du portefeuille (utile pour le chargement initial de l'UI).
+
+### 4.3. Structure des Slices Redux (Exemple `portfolioSlice.ts`)
+
+Basé sur la structure suggérée dans `src/features/Portfolio/PortfolioSlice.ts`:
+
+```typescript
+// src/features/Portfolio/PortfolioSlice.ts
+import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+
+interface Position {
+  asset: string;
+  amount: number;
+  avg_buy_price: number;
+  current_price: number;
+  value_usd: number;
+}
+
+interface PortfolioState {
+  total_value_usd: number;
+  pnl_24h_usd: number;
+  positions: Position[];
+  available_cash_usdc: number;
+  isLoading: boolean;
+  lastUpdated: string | null;
+}
+
+const initialState: PortfolioState = {
+  total_value_usd: 0,
+  pnl_24h_usd: 0,
+  positions: [],
+  available_cash_usdc: 0,
+  isLoading: true,
+  lastUpdated: null,
+};
+
+const portfolioSlice = createSlice({
+  name: 'portfolio',
+  initialState,
+  reducers: {
+    setPortfolioLoading: (state, action: PayloadAction<boolean>) => {
+      state.isLoading = action.payload;
+    },
+    updatePortfolio: (state, action: PayloadAction<Partial<PortfolioState>>) => {
+      // Merge new data with existing state
+      Object.assign(state, action.payload);
+      state.isLoading = false;
+      state.lastUpdated = new Date().toISOString();
+    },
+    // Potentially actions for optimistic updates or specific position changes
+  },
+});
+
+export const { setPortfolioLoading, updatePortfolio } = portfolioSlice.actions;
+export default portfolioSlice.reducer;
+```
+
+Des slices similaires seraient créés pour `tradesSlice`, `aiAgentSlice`, `marketSlice`, `systemSlice`, `logsSlice`, etc., chacun gérant sa partie de l'état global de l'application et répondant aux événements Socket.io ou aux résultats d'appels API.
+
+Les composants React (notamment ceux utilisant `Recharts`) s'abonneraient à ces slices Redux via le hook `useSelector` pour obtenir les données nécessaires et se réafficher lorsque l'état change.
 
 ## Sources de Données pour l'UI (via API Backend FastAPI & Socket.io):
 

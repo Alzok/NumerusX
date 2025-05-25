@@ -14,6 +14,51 @@
     - [ ] **Modélisation par Graphes de Connaissance (Knowledge Graphs)**: Construire un graphe où les nœuds sont des événements, des tokens, des acteurs du marché, et les arêtes représentent leurs relations (causalité, influence, temporalité).
     - [ ] **Inférence Causale**: Appliquer des techniques d\'inférence causale (ex: réseaux bayésiens dynamiques, modèles de DoWhy/CausalML) pour quantifier l\'impact probable d\'un nouvel événement sur les prix.
     - [ ] **Intégration au `prediction_engine`**: Les signaux causaux viendraient enrichir les features ou moduler la confiance des prédictions ML.
+    - [ ] **Intégration Prévue avec AIAgent**:
+        -   Le MAC-MM produira un output structuré qui sera inclus dans `aggregated_inputs`.
+        -   Cet output pourrait être une liste d'événements causaux pertinents ou un score d'impact causal global.
+        -   **Structure dans `aggregated_inputs`**:
+            ```json
+            "causal_analysis_insights": {
+                "active_causal_events": [
+                    {
+                        "event_id": "uuid_event_1",
+                        "event_type": "MACRO_ECONOMIC_RELEASE", // e.g., INTEREST_RATE_DECISION, CPI_REPORT
+                        "source": "EconomicCalendarX",
+                        "description": "US Federal Reserve increases interest rates by 0.25%",
+                        "detected_at_utc": "2023-11-15T18:05:00Z",
+                        "expected_impact_on_target_pair": { // e.g., SOL/USDC
+                            "direction": "NEGATIVE", // NEGATIVE, POSITIVE, NEUTRAL, UNCERTAIN
+                            "magnitude": "MEDIUM", // LOW, MEDIUM, HIGH
+                            "confidence": 0.70, // Confidence in this impact assessment
+                            "time_horizon_hours": 24,
+                            "reasoning_snippet": "Higher interest rates typically strengthen USD, potentially pressuring SOL."
+                        },
+                        "related_assets_potentially_affected": ["BTC", "ETH"]
+                    },
+                    {
+                        "event_id": "uuid_event_2",
+                        "event_type": "PROJECT_SPECIFIC_NEWS", // e.g., MAINNET_LAUNCH, PARTNERSHIP_ANNOUNCEMENT, SECURITY_BREACH
+                        "source": "SolanaProjectBlog",
+                        "description": "Project Y on Solana announces major partnership with Company Z.",
+                        "detected_at_utc": "2023-11-15T10:00:00Z",
+                        "expected_impact_on_target_pair": {
+                            "direction": "POSITIVE",
+                            "magnitude": "LOW",
+                            "confidence": 0.85,
+                            "time_horizon_hours": 48,
+                            "reasoning_snippet": "Positive news for Project Y may indirectly benefit SOL ecosystem sentiment."
+                        }
+                    }
+                ],
+                "overall_causal_pressure_on_target_pair": "SLIGHTLY_NEGATIVE", // AGGREGATED_VIEW: STRONG_POSITIVE, POSITIVE, SLIGHTLY_POSITIVE, NEUTRAL, SLIGHTLY_NEGATIVE, NEGATIVE, STRONG_NEGATIVE
+                "last_updated_utc": "2023-11-15T18:10:00Z"
+            }
+            ```
+    - [ ] **Adaptation du Prompt Gemini**:
+        -   Le prompt de l'AIAgent inclura une section "CAUSAL ANALYSIS INSIGHTS" si des données sont disponibles.
+        -   Exemple d'instruction pour Gemini: "Consider the following causal analysis insights. These represent identified external events and their potential market impact. Factor these into your overall decision, noting their specified confidence and time horizon. Prioritize events with higher confidence and relevance to the target pair."
+        -   Gemini devra évaluer comment ces événements externes (souvent qualitatifs) modifient les signaux plus quantitatifs issus des indicateurs techniques ou des prédictions de prix.
 
 ### 1.2. Modélisation de la Liquidité Dynamique et Prédiction d\'Impact
 - [ ] **Feature**: Créer un modèle prédictif pour l\'évolution de la liquidité des pools (sur Jupiter/Raydium) et l\'impact sur les prix des transactions de différentes tailles *avant* leur exécution.
@@ -27,6 +72,27 @@
     - [ ] **Apprentissage sur Données Historiques de Liquidité**: Entraîner un modèle (séries temporelles, ex: LSTM) sur l\'historique des snapshots de liquidité des pools pour prédire leur état à court terme.
     - [ ] **Simulation d\'Impact de Prix**: Développer un simulateur plus fin que la simple API `get_quote` de Jupiter, en considérant la structure actuelle du pool et les transactions récentes.
     - [ ] **Intégration au `trading_engine`**: Le moteur pourrait ajuster la taille de l\'ordre ou le fractionner en plusieurs petits ordres (TWAP/VWAP adaptatif) en fonction de la liquidité prédite et du déséquilibre détecté.
+    - [ ] **Intégration Prévue avec AIAgent**:
+        -   Les prédictions de liquidité et d'impact de prix seront fournies à l'AIAgent.
+        -   Ces informations aideront l'AIAgent à décider non seulement *si* trader, mais aussi *comment* (taille, urgence).
+        -   **Structure dans `aggregated_inputs`**:
+            ```json
+            "liquidity_and_impact_analysis": {
+                "target_pair": "SOL/USDC",
+                "current_liquidity_state": { // For various potential trade sizes
+                    "size_5000_usd": { "estimated_slippage_bps": 5, "expected_fill_price": 165.22, "liquidity_rating": "GOOD" },
+                    "size_50000_usd": { "estimated_slippage_bps": 25, "expected_fill_price": 164.90, "liquidity_rating": "MODERATE" },
+                    "size_200000_usd": { "estimated_slippage_bps": 150, "expected_fill_price": 162.00, "liquidity_rating": "POOR_WARNING" }
+                },
+                "predicted_liquidity_trend_1h": "STABLE", // IMPROVING, STABLE, DETERIORATING
+                "optimal_execution_time_window_minutes": 15, // Suggested window for better execution based on predicted liquidity flows
+                "last_updated_utc": "2023-11-15T18:00:00Z"
+            }
+            ```
+    - [ ] **Adaptation du Prompt Gemini**:
+        -   Section: "LIQUIDITY AND EXECUTION CONTEXT".
+        -   Instruction: "The following data describes the current and predicted liquidity for the target pair. If you decide to trade, consider this information to recommend an execution strategy (e.g., if liquidity is poor for desired size, suggest HOLD or reducing trade size). Your `amount_usd` decision should be informed by the estimated slippage."
+        -   Gemini peut utiliser ces données pour affiner `amount_usd`, ou même changer sa décision `BUY/SELL/HOLD` si l'impact de prix est trop important.
 
 ## II. Stratégies de Trading Agentiques et Adaptatives
 
@@ -40,6 +106,33 @@
     - [ ] **Communication et Collaboration (Optionnel)**: Les agents pourraient partager des informations sur les features ou les conditions de marché qui semblent prometteuses.
     - [ ] **Sélection et Évolution**: Périodiquement, les stratégies (ou paramètres) les moins performantes sont éliminées, et les plus performantes sont "reproduites" avec de légères mutations, s\'inspirant des algorithmes génétiques.
     - [ ] **Meta-Stratégie**: Un agent "maître" pourrait agréger les signaux des meilleurs agents ou allouer dynamiquement du capital aux stratégies les plus performantes en temps réel.
+    - [ ] **Intégration Prévue avec AIAgent**:
+        -   **Option A (Signaux Directs)**: Les N meilleures stratégies du swarm fournissent leurs signaux individuels comme n'importe quelle autre stratégie dans `aggregated_inputs.signal_sources`.
+            ```json
+            // Dans aggregated_inputs.signal_sources
+            {
+                "source_name": "SwarmStrategy_Alpha_1337",
+                "signal": "BUY",
+                "confidence": 0.78,
+                "indicators": {"custom_feature_1": 0.9, "custom_feature_2": "POSITIVE"},
+                "reasoning_snippet": "Learned pattern X detected in current market.",
+                "strategy_metadata": {"type": "swarm_learned", "backtest_sharpe_recent": 2.1}
+            }
+            ```
+        -   **Option B (Signal Agrégé du Maître Swarm)**: L'agent maître du swarm fournit une recommandation de plus haut niveau.
+            ```json
+            // Nouvelle clé dans aggregated_inputs
+            "swarm_intelligence_directive": {
+                "overall_market_bias_from_swarm": "BULLISH_CONSOLIDATION",
+                "top_performing_swarm_strategies_types": ["momentum_breakout", "volatility_contraction"],
+                "recommended_action_based_on_swarm_consensus": "HOLD_WITH_CAUTION", // ou BUY, SELL
+                "swarm_consensus_confidence": 0.65,
+                "reasoning_snippet": "Majority of high-performing swarm agents suggest current conditions are not optimal for new entries despite some bullish undertones."
+            }
+            ```
+    - [ ] **Adaptation du Prompt Gemini**:
+        -   **Pour Option A**: "You will receive signals from `SwarmStrategy_` sources. These are dynamically evolved strategies. Evaluate them alongside other signals."
+        -   **Pour Option B**: Section "SWARM INTELLIGENCE DIRECTIVE". Instruction: "A meta-agent analyzing a swarm of trading strategies provides the following directive. Use this as a high-level input to contextualize other signals. If the swarm consensus is strong, it may warrant greater attention."
 
 ### 2.2. "Shadow Trading" Dynamique Basé sur l\'Analyse Comportementale des Wallets Performants
 - [ ] **Feature**: Identifier et suivre (sans copier directement les trades pour éviter le front-running) les comportements et stratégies implicites de portefeuilles historiquement très performants sur Solana.
@@ -52,6 +145,31 @@
     - [ ] **Modélisation Comportementale**: Créer un modèle ML (ex: Hidden Markov Model, LSTMs avec attention) qui apprend à prédire la *prochaine action probable* d\'un wallet performant en fonction du contexte de marché.
     - [ ] **Génération de Signaux Inspirés**: Si le modèle prédit qu\'un wallet cible est susceptible d\'acheter un token X, et que les propres analyses de NumerusX corroborent un potentiel, un signal d\'achat pourrait être généré/renforcé.
     - [ ] **Filtre Éthique et de Risque**: Toujours appliquer les filtres de sécurité et de risque de NumerusX. Ne pas suivre aveuglément.
+    - [ ] **Intégration Prévue avec AIAgent**:
+        -   Les "signaux inspirés" du Shadow Trading alimenteront l'AIAgent.
+        -   **Structure dans `aggregated_inputs`**:
+            ```json
+            // Potentiellement dans aggregated_inputs.signal_sources ou une section dédiée
+            "shadow_trading_insights": {
+                "watched_wallets_activity_summary": [ // Top N wallets ou ceux avec activité récente pertinente
+                    {
+                        "wallet_profile_id": "SmartMoney_Profile_A", // Anonymized profile
+                        "recent_action_type_target_pair": "ACCUMULATION_SUSPECTED", // e.g. ACCUMULATION_SUSPECTED, DISTRIBUTION_STARTING, HOLDING_STRONG, PROFIT_TAKING
+                        "confidence_in_action_type": 0.70,
+                        "relevant_token": "SOL", // ou la paire spécifique
+                        "action_timestamp_utc": "2023-11-15T14:00:00Z",
+                        "reasoning_snippet": "Wallet Profile A has historically shown strong accumulation before upward trends for this asset class."
+                    }
+                ],
+                "overall_shadow_signal_for_target_pair": "POTENTIAL_BUY_WINDOW", // POTENTIAL_BUY_WINDOW, CAUTION_SELL_PRESSURE_BUILDING, NEUTRAL_OBSERVE
+                "confidence_in_shadow_signal": 0.60,
+                "last_updated_utc": "2023-11-15T18:00:00Z"
+            }
+            ```
+    - [ ] **Adaptation du Prompt Gemini**:
+        -   Section: "SHADOW TRADING INSIGHTS".
+        -   Instruction: "The following insights are derived from observing historically performant wallets. This is NOT a directive to copy trades but an additional contextual signal about potential market interest or sentiment from sophisticated actors. Correlate this with other data before making a decision."
+        -   Gemini doit utiliser cette information comme une source de confirmation ou d'alerte, mais pas comme un signal de trading primaire.
 
 ## III. Optimisation Avancée de l\'Exécution et de la Gestion des Risques
 
@@ -520,7 +638,71 @@ En complément de `todo-features.md` (IV.2 - Jumeau Numérique), un moteur de ba
     -   [ ] Graphiques de comparaison de stratégies.
     -   [ ] Marqueurs d\'entrée/sortie de trade sur les graphiques.
 
+-   [ ] **Stratégie de Backtesting Spécifique pour l\'AIAgent Basé sur LLM (Gemini)**:
+    -   [ ] **Objectif Principal**: Évaluer l'efficacité des *décisions* de l'AIAgent et la performance du *système global d\'exécution* de ces décisions, tout en gérant les défis de coût et de reproductibilité des LLMs.
+    -   [ ] **Phase 1: Collecte de Données de Décision (Mode Live/Paper Trading)**:
+        -   [ ] Pendant les opérations en mode live ou paper trading, journaliser de manière exhaustive:
+            -   L\'intégralité des `aggregated_inputs` envoyés à `AIAgent.decide_trade()`.
+            -   Le prompt exact généré et envoyé à `GeminiClient`.
+            -   La réponse JSON brute exacte reçue de `GeminiClient`.
+            -   La décision structurée finale parsée par `AIAgent` (incluant action, montant, SL/TP, raisonnement).
+            -   Toutes les étapes d\'exécution du trade par `TradeExecutor` et `TradingEngine`, y compris les signatures de transaction, les prix d\'exécution réels, les erreurs, etc.
+        -   [ ] Stocker ces enregistrements dans une base de données dédiée au backtesting/analyse (peut-être une copie ou une section de `EnhancedDatabase`).
+    -   [ ] **Phase 2: Backtesting par "Rejeu de Décisions" (Decision Replay)**:
+        -   [ ] **Principe**: Utiliser les décisions *déjà prises et enregistrées* par Gemini lors du fonctionnement réel/papier.
+        -   [ ] Le `BacktestEngine` chargera les données de marché historiques OHLCV pour la période correspondante.
+        -   [ ] Pour chaque point temporel dans les données historiques où une décision a été enregistrée (basée sur le timestamp des `aggregated_inputs`):
+            -   Le `BacktestEngine` ne réinterrogera PAS l\'API Gemini.
+            -   Il récupérera la `décision structurée finale parsée` correspondante depuis la base de données de la Phase 1.
+            -   Il simulera l\'exécution de cette décision fixe contre les données de marché historiques au moment `t` (en utilisant les prix `close` ou `open` de la bougie suivante, et en appliquant des modèles de slippage et de frais configurables dans `BacktestEngine`).
+        -   [ ] **Avantages de cette approche**:
+            -   **Coût Nul pour l\'API LLM**: Pas d\'appels à Gemini pendant le backtest.
+            -   **Reproductibilité Parfaite des Décisions LLM**: Les décisions sont fixes.
+            -   **Focalisation sur l\'Exécution et les Paramètres SL/TP**: Permet d\'évaluer si les SL/TP suggérés par l\'IA étaient pertinents, si le timing d\'exécution était bon, et comment les frais/slippage impactent la performance des décisions de l\'IA.
+            -   **Permet de tester des ajustements de la logique d\'exécution ou des paramètres de risque *autour* des décisions de l\'IA**.
+    -   [ ] **Phase 3: Analyse de Performance et Itération**:
+        -   [ ] Analyser les résultats du backtest par rejeu pour identifier les points faibles (ex: SL trop serrés, impact du slippage mal estimé par l\'IA).
+        -   Utiliser ces analyses pour affiner:
+            -   Le prompt Gemini (ex: demander des SL/TP plus larges, ou de considérer le slippage de manière plus explicite).
+            -   La logique de `TradeExecutor` ou `RiskManager`.
+    -   [ ] **Limitations et Compléments**: 
+        -   Cette méthode ne backteste pas la *capacité de généralisation* de Gemini à des situations de marché radicalement différentes de celles rencontrées lors de la collecte des décisions. Elle teste principalement la qualité des décisions passées dans leur contexte d'exécution.
+        -   Pour évaluer la robustesse du *prompt* lui-même, des tests limités et ciblés avec des `aggregated_inputs` historiques spécifiques (représentant des conditions de marché variées ou critiques) peuvent être effectués manuellement ou via des scripts de test dédiés (avec appels réels à Gemini, en gardant un œil sur les coûts).
+        -   **[NOUVEAU] Phase 2.bis: Évaluation de la Généralisation des Décisions sur Données Non Vues (Coût Contrôlé)**:
+            -   [ ] Sélectionner un sous-ensemble représentatif mais limité (ex: 50-100 points de décision) de `aggregated_inputs` historiques qui n'ont **pas** été utilisés lors de la phase de collecte de décision initiale (Phase 1).
+            -   [ ] Soumettre ces `aggregated_inputs` à l'`AIAgent` pour obtenir de nouvelles décisions de Gemini (ceci impliquera des appels API réels et donc un coût).
+            -   [ ] Simuler l'exécution de ces nouvelles décisions contre les données historiques correspondantes (comme en Phase 2).
+            -   [ ] Comparer la performance de ces décisions "à froid" avec celles obtenues par rejeu (Phase 2) et avec un benchmark simple (ex: buy & hold).
+            -   [ ] **Objectif**: Obtenir une estimation de la capacité de l'AIAgent à généraliser son raisonnement à des situations non vues, sans encourir les coûts d'un backtest complet avec appels LLM.
+        -   **Focus du backtesting des modules d'input**: Les modules qui génèrent les `aggregated_inputs` (stratégies, `PredictionEngine`, `AnalyticsEngine`) doivent être backtestés de manière plus traditionnelle, en évaluant la qualité de leurs signaux/prédictions par rapport aux données historiques, indépendamment de l'AIAgent. Un bon signal d'entrée est crucial pour une bonne décision de l'IA.
+    -   [ ] **Pas de Simulation/Mocking de Gemini à ce stade**: Simuler la logique de Gemini est extrêmement complexe et peu fiable. Le rejeu de décisions existantes est la stratégie privilégiée.
+
 ## 8. Market-Making Capabilities (`market_maker.py`)
+
+-   [ ] **Clarification du Rôle dans l'Architecture centrée sur l'AIAgent**:
+    -   [ ] **Mode Opérationnel Principal**: Le `market_maker.py` ne fonctionnera pas de manière complètement autonome pour prendre des décisions de market making actives en production initiale. Son rôle principal sera d'agir comme un **fournisseur d'analyses avancées** et de **capacités d'exécution spécialisées** pour l'`AIAgent`.
+    -   [ ] **Inputs Fournis à l'AIAgent**:
+        -   Analyse des spreads optimaux potentiels.
+        -   Évaluation des risques d'inventaire pour des paires spécifiques.
+        -   Scores de "toxicité" du flux d'ordres.
+        -   Prédictions de volatilité à court terme spécifiques au market making.
+        -   Ces informations seraient structurées et incluses dans `aggregated_inputs` sous une clé comme `market_making_analysis`.
+            ```json
+            // Dans aggregated_inputs
+            "market_making_analysis": {
+                "target_pair": "SOL/USDC",
+                "optimal_spread_bps_suggestion": 15, // Suggestion de spread si l'IA envisageait de fournir de la liquidité
+                "inventory_risk_score": 0.3, // 0 (low) to 1 (high) for current target pair inventory
+                "order_flow_toxicity_score": 0.1,
+                "short_term_volatility_market_making": "LOW",
+                "reasoning_snippet": "Current spread is tight, low toxicity, but inventory slightly skewed."
+            }
+            ```
+    -   [ ] **Décision de l'AIAgent**: L'`AIAgent` (via Gemini) pourrait utiliser ces informations pour:
+        -   Informer ses décisions de trading directionnel (ex: si le flux est toxique, éviter de trader).
+        -   **Potentiellement, dans une phase ultérieure**, décider d'activer un mode de "fourniture de liquidité passive" si les conditions de marché (analysées par `market_maker.py`) sont jugées extrêmement favorables et à faible risque. Dans ce cas, l'`AIAgent` définirait les paramètres clés (paire, exposition max, spread cible) et `market_maker.py` exécuterait cette stratégie passive, toujours sous la supervision de `DexBot`.
+    -   [ ] **Interaction avec `TradingEngine`**: Si l'`AIAgent` décide de placer des ordres qui s'apparentent à du market making (ex: des ordres limites des deux côtés du carnet pour une paire spécifique et pour une courte durée), `market_maker.py` pourrait fournir la logique pour calculer les prix et tailles optimaux de ces ordres, que `TradingEngine` exécuterait ensuite.
+    -   [ ] **Pas d'Autonomie Initiale**: Le `market_maker.py` n'aura pas de capital propre alloué ni la capacité de démarrer/arrêter ses opérations de manière autonome. Toute activité sera initiée et paramétrée par une décision de l'`AIAgent`.
 
 -   [ ] **Définition du Market Maker de Base**:
     -   [ ] `MarketMaker` classe:
@@ -581,3 +763,14 @@ Cette section détaille des idées d\'amélioration basées sur l\'analyse de r�
 - [ ] **Complexité**: Conceptuelle: Moyenne / Implémentation: Moyenne à Élevée (limites API GitHub, traitement données).
 - [ ] **Intégration**: `app/prediction_engine.py` ou nouveau module `developer_network_analyzer.py` pour fournir prédictions de corrélation au `StrategyFramework`.
 
+  - [ ] **Intégration au `prediction_engine`**: Les signaux causaux viendraient enrichir les features ou moduler la confiance des prédictions ML.
+  - [ ] **Intégration Prévue**: Le MAC-MM agirait comme une source d'enrichissement pour le `PredictionEngine` ou comme une source de signaux distincte dans les `aggregated_inputs` pour l'`AIAgent`. Il pourrait fournir des scores de probabilité d'impact pour des événements détectés ou des facteurs de confiance ajustés pour certaines prédictions.
+  - [ ] **Impact Potentiel sur Prompt Gemini**: Un nouvel objet dans `aggregated_inputs.signal_sources` ou une nouvelle clé `aggregated_inputs.causal_analysis` pourrait contenir des informations structurées telles que : `{"event_type": "REGULATORY_NEWS_CRYPTO", "detected_event": "SEC announces new DeFi rules for protocol X", "predicted_impact_on_SOL_USDC": "NEGATIVE_MEDIUM_CONFIDENCE", "time_horizon_hours": 12, "causal_strength_score": 0.65}`.
+
+### 1.2. Modélisation de la Liquidité Dynamique et Prédiction d'Impact 
+
+- [ ] **Meta-Stratégie**: Un agent "maître" pourrait agréger les signaux des meilleurs agents ou allouer dynamiquement du capital aux stratégies les plus performantes en temps réel.
+- [ ] **Intégration Prévue**: Les stratégies les plus performantes découvertes par le Swarm pourraient être enregistrées et rendues disponibles via le `StrategyFramework`, devenant ainsi des sources de signaux standard pour l'`AIAgent`. Alternativement, l'agent "maître" du Swarm pourrait lui-même fournir un signal agrégé ou une recommandation d'allocation de stratégie directement à l'`AIAgent`.
+- [ ] **Impact Potentiel sur Prompt Gemini**: De nouveaux signaux pourraient apparaître dans `aggregated_inputs.signal_sources` (ex: `{"source_name": "SwarmAlpha_Strategy_Variant_7B", "signal": "BUY", "confidence": 0.75, ...}`). Si un agent maître fournit un signal d'allocation, cela pourrait être un input de plus haut niveau dans `aggregated_inputs`, par exemple: `"swarm_meta_signal": {"recommended_strategy_focus": ["MomentumStrategy_1h", "SwarmAlpha_7B"], "confidence_in_focus": 0.7, "reasoning": "Current market regime favors these approaches according to swarm learning."}`.
+
+### 2.2. "Shadow Trading" Dynamique Basé sur l'Analyse Comportementale des Wallets Performants 

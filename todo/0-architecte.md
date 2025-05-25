@@ -214,6 +214,8 @@ sequenceDiagram
 
 ### B. Couche de Génération de Features et Signaux (Anciennement Analyse et IA)
 
+Les modules de cette couche sont redéfinis pour agir comme des fournisseurs d'informations structurées à l'Agent IA. Leurs outputs doivent être standardisés (ex: dictionnaires Python bien définis ou objets Pydantic) pour faciliter l'agrégation par `DexBot` et la consommation par l'`AIAgent`. Voir l'exemple de structure `aggregated_inputs` dans `todo/02-todo-ai-api-gemini.md`.
+
 -   **`app/analytics_engine.py` (`AdvancedTradingStrategy` en tant que fournisseur de features TA)**:
     -   **Rôle Redéfini**: Génère des indicateurs techniques avancés et des analyses de structure de marché comme *input* pour l'Agent IA. Ne prend plus de décision de trade finale.
 -   **`app/prediction_engine.py` (`PricePredictor`, `MarketRegimeClassifier`, `SentimentAnalyzer`)**:
@@ -221,12 +223,12 @@ sequenceDiagram
 -   **`app/strategy_framework.py` (`BaseStrategy`) et `app/strategies/`**:
     -   **Rôle Redéfini**: Les stratégies deviennent des "modules de signaux" ou "extracteurs de features". Leur output (`analyze`, `generate_signal`) est un *input* pour l'Agent IA.
 -   **`app/strategy_selector.py` (`StrategySelector`)**:
-    -   **Rôle Redéfini**: Pourrait être utilisé par l'Agent IA pour dynamiquement choisir quels "modules de signaux" (stratégies) écouter ou pondérer plus fortement, ou par `DexBot` pour préparer le set d'inputs pour l'agent.
+    -   **Rôle Redéfini**: Pourrait être utilisé par `DexBot` pour **pré-sélectionner ou pré-filtrer un ensemble de signaux ou de stratégies jugées pertinentes** pour le contexte de marché actuel (par exemple, en se basant sur une détection de régime de marché simple ou une configuration utilisateur). Ces signaux préparés (outputs de `analyze`/`generate_signal` des stratégies sélectionnées et potentiellement enrichis de méta-données par le `StrategySelector`) seraient ensuite inclus par `DexBot` dans le dictionnaire `aggregated_inputs` fourni à l'`AIAgent`. L'`AIAgent` ne communique pas directement avec le `StrategySelector`. **L'Agent IA (`Gemini`) conserve la responsabilité finale de l'analyse, de la pondération, et de la décision basée sur l'ensemble des inputs reçus**, y compris ceux potentiellement filtrés ou mis en évidence par le `StrategySelector`. Le `StrategySelector` ne prend pas la décision finale et n'impose pas une stratégie unique, mais peut aider à réduire le "bruit" ou à focaliser l'attention de l'AIAgent sur les inputs les plus prometteurs pour une situation donnée. Il peut également enrichir les signaux des stratégies avec des **méta-données** (ex: performance historique de la stratégie, type de signaux qu'elle génère, conditions idéales d'opération) pour aider l'AIAgent dans son processus d'évaluation et de synthèse.
 
 ### C. Couche Noyau Décisionnel Intelligent (Nouveau)
 
 -   **`app/ai_agent.py` (`AIAgent`)**:
-    -   **Rôle**: Le nouveau cœur décisionnel. Reçoit tous les inputs pertinents (données de marché, signaux des stratégies, prédictions IA, contraintes de risque/sécurité, état du portefeuille). L'implémentation initiale s'appuiera sur un modèle LLM avancé (ex: Google Gemini).
+    -   **Rôle**: Le nouveau cœur décisionnel. Reçoit tous les inputs pertinents (données de marché, signaux des stratégies, prédictions IA, contraintes de risque/sécurité, état du portefeuille). L'implémentation initiale s'appuiera sur un modèle LLM avancé (ex: Google Gemini). Pour ce faire, il s'interface avec le `GeminiClient` (défini dans `app/ai_agent/gemini_client.py`), qui utilise la bibliothèque `google-generativeai` pour communiquer avec l'API Google Gemini.
     -   **Logique Interne**: Contient la logique (ML, RL, ensemble de modèles, heuristiques avancées) pour synthétiser ces inputs et générer un ordre de trade final et optimal.
     -   **Output**: Ordre de trade précis ou décision de ne pas trader, accompagné d'un "raisonnement" loggable.
     -   **Interactions**: Reçoit des données de multiples modules via `DexBot`. Retourne sa décision à `DexBot`.
@@ -250,7 +252,7 @@ sequenceDiagram
 -   **`numerusx-ui/` (Nouvelle Application Frontend React)**:
     -   **Rôle**: Interface utilisateur moderne, réactive et riche en fonctionnalités pour le contrôle et la visualisation du bot NumerusX.
     -   **Technologies**: React, ShadCN/UI, Tailwind CSS, Recharts, Redux, Socket.io, Clerk/Auth0, i18next.
-    -   **Interactions**: Communique avec le backend (FastAPI) via des API REST et des WebSockets (Socket.io) pour les données en temps réel et les actions de contrôle.
+    -   **Interactions**: Communique avec le backend (FastAPI) via des API REST et des WebSockets (Socket.io) pour les données en temps réel et les actions de contrôle. Les détails spécifiques des endpoints REST et des événements Socket.io sont documentés dans `todo/01-todo-ui.md` (Phase 4) et `todo/01-todo-core.md` (Tâches 1.10.1 et 1.10.5).
     -   Doit être capable d'afficher :
         -   Le raisonnement de l'Agent IA pour chaque trade.
         -   L'état de l'Agent IA.
@@ -271,6 +273,6 @@ sequenceDiagram
 
 ## VI. Intégration des Fonctionnalités Avancées (Revu avec Agent IA)
 
--   Toutes les fonctionnalités avancées (MAC-MM, GNN Liquidité, TDA, Swarm Intelligence, etc.) de `02-todo-advanced-features.md` deviennent des sources d'input potentielles ou des méthodes d'amélioration pour l'`AIAgent` lui-même.
+-   Toutes les fonctionnalités avancées (MAC-MM, GNN Liquidité, TDA, Swarm Intelligence, etc.) de `todo/03-todo-advanced-features.md` deviennent des sources d'input potentielles ou des méthodes d'amélioration pour l'`AIAgent` lui-même.
 -   "Shadow Trading", "Deep RL Portfolio Management" pourraient être des modes de fonctionnement ou des logiques internes de l'`AIAgent`.
 -   "Rapports de Décision LLM" devient le "raisonnement" de l'`AIAgent`.

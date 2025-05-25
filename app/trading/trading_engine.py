@@ -533,100 +533,95 @@ class TradingEngine:
         self.transaction_history.append(transaction_record)
         self.last_transaction_signature = result.get("signature")
 
-    async def _get_api_session(self) -> aiohttp.ClientSession:
-        """Returns an active aiohttp.ClientSession."""
-        if self._api_session is None or self._api_session.closed:
-            # You might want to configure connectors, timeouts, etc.
-            self._api_session = aiohttp.ClientSession()
-        return self._api_session
+    # async def _get_api_session(self) -> aiohttp.ClientSession:
+    #     """Crée et retourne une session aiohttp."""
+    #     if self._api_session is None or self._api_session.closed:
+    #         self._api_session = aiohttp.ClientSession()
+    #     return self._api_session
+    #
+    # async def _close_api_session(self):
+    #     """Ferme la session aiohttp si elle est ouverte."""
+    #     if self._api_session and not self._api_session.closed:
+    #         await self._api_session.close()
+    #         logger.info("aiohttp session closed.")
+    #
+    # async def _make_jupiter_api_request(self, method: str, endpoint: str, params: Optional[Dict] = None, data: Optional[Dict] = None) -> Dict[str, Any]:
+    #     """
+    #     Effectue une requête HTTP à l'API Jupiter V6 en utilisant aiohttp.
+    #     DEPRECATED: Should use JupiterApiClient with the SDK.
+    #     Args:
+    #         method: Méthode HTTP (GET, POST).
+    #         endpoint: Le chemin de l'API (ex: /quote).
+    #         params: Dictionnaire de paramètres d'URL pour les requêtes GET.
+    #         data: Dictionnaire de données JSON pour les requêtes POST.
+    #
+    #     Returns:
+    #         La réponse JSON de l'API sous forme de dictionnaire.
+    #
+    #     Raises:
+    #         JupiterAPIError: Si la requête échoue ou retourne un statut d'erreur.
+    #     """
+    #     session = await self._get_api_session()
+    #     # Note: Config.JUPITER_API_BASE_URL_V6 should be the correct base for v6 direct calls if any were needed.
+    #     # However, JupiterApiClient handles URL construction now. This method is purely for legacy/direct aiohttp example.
+    #     # This method is marked as DEPRECATED.
+    #     base_url = self.config.JUPITER_API_BASE_URL_V6 # Example if it were used
+    #     if not base_url:
+    #         logger.error("JUPITER_API_BASE_URL_V6 not configured.")
+    #         raise JupiterAPIError("Jupiter API base URL not configured.", api_name="JupiterV6_Direct")
+    #     
+    #     url = f"{base_url}{endpoint}"
+    #     
+    #     headers = {"Accept": "application/json"}
+    #     if self.config.JUPITER_V6_API_KEY: # Example if a key was needed for direct calls
+    #         headers["Authorization"] = f"Bearer {self.config.JUPITER_V6_API_KEY}"
+    #
+    #     try:
+    #         logger.debug(f"Making {method} request to {url} with params={params}, data={data}")
+    #         async with session.request(method, url, params=params, json=data, headers=headers, timeout=self.config.JUPITER_REQUEST_TIMEOUT) as response:
+    #             response_text = await response.text() # Read text first for better error logging
+    #             logger.debug(f"Jupiter V6 API raw response ({response.status}): {response_text[:500]}") # Log snippet
+    #             if response.status == 200:
+    #                 try:
+    #                     return await response.json()
+    #                 except aiohttp.ContentTypeError:
+    #                     logger.error(f"Jupiter API V6 content type error. Response: {response_text}")
+    #                     raise JupiterAPIError(f"Invalid JSON response from Jupiter V6 API. Status: {response.status}. Response: {response_text[:200]}", status_code=response.status, api_name="JupiterV6_Direct")
+    #             else:
+    #                 logger.error(f"Jupiter API V6 request failed with status {response.status}: {response_text}")
+    #                 raise JupiterAPIError(f"Jupiter V6 API error. Status: {response.status}. Response: {response_text[:200]}", status_code=response.status, api_name="JupiterV6_Direct")
+    #     except aiohttp.ClientError as e: # Handles timeouts, connection errors etc.
+    #         logger.error(f"aiohttp client error during Jupiter V6 API request: {e}")
+    #         raise JupiterAPIError(f"Network or client error during Jupiter V6 API request: {e}", api_name="JupiterV6_Direct")
+    #     except asyncio.TimeoutError:
+    #         logger.error(f"Timeout during Jupiter V6 API request to {url}")
+    #         raise JupiterAPIError(f"Timeout during Jupiter V6 API request to {url}", api_name="JupiterV6_Direct")
+    #     except Exception as e:
+    #         logger.error(f"Unexpected error during Jupiter V6 API request: {e}", exc_info=True)
+    #         raise JupiterAPIError(f"Unexpected error: {e}", api_name="JupiterV6_Direct")
+    #
+    #
+    #    # Example usage of how record_transaction might be called internally if there were other trade types.
+    #    # This is not directly related to Jupiter swap but general structure.
+    #    # def record_manual_trade(self, pair_address: str, trade_type: str, amount: float, price: float, reason: str):
+    #        details = {
+    #            "pair_address": pair_address,
+    #            "trade_type": trade_type,
+    #            "amount": amount,
+    #            "price": price,
+    #            "reason": reason,
+    #            "timestamp": time.time(),
+    #            "source": "manual"
+    #        }
+    #        # Simplified result for manual trade logging
+    #        result = {
+    #            "success": True, 
+    #            "signature": None, # No on-chain signature for purely manual log
+    #            "message": f"Manual trade logged for {pair_address}."
+    #        }
+    #        self._record_transaction(result, details)
+    #        logger.info(f"Manual trade for {pair_address} recorded.")
 
-    async def _close_api_session(self):
-        """Closes the aiohttp.ClientSession if it exists and is open."""
-        if self._api_session and not self._api_session.closed:
-            await self._api_session.close()
-            self._api_session = None
-
-    async def _make_jupiter_api_request(self, method: str, endpoint: str, params: Optional[Dict] = None, data: Optional[Dict] = None) -> Dict[str, Any]:
-        """
-        Helper function to make requests to Jupiter API with standardized error handling.
-        Args:
-            method: HTTP method (GET, POST).
-            endpoint: Jupiter API endpoint (e.g., /quote, /swap).
-            params: Query parameters for GET requests.
-            data: JSON body for POST requests.
-        Returns:
-            A dictionary {'success': bool, 'error': str|None, 'data': Any|None}.
-        """
-        session = await self._get_api_session()
-        url = f"{Config.JUPITER_API_V6_URL}{endpoint}"
-        request_context = f"Jupiter API: {method} {url}, Params: {params}, Data: {data}"
-        logger.debug(f"Making request: {request_context}")
-
-        headers = {}
-        if Config.JUPITER_API_KEY: # Add API key if configured
-            headers["Authorization"] = f"Bearer {Config.JUPITER_API_KEY}"
-
-        try:
-            async with session.request(method, url, params=params, json=data, headers=headers, timeout=Config.API_TIMEOUT_SECONDS_JUPITER_QUOTE) as response:
-                response_text = await response.text()
-                # Jupiter API can return 200 OK with an error object in the body
-                # e.g., {"errorCode":"QUOTE_NOT_FOUND","message":"..."}
-                # So, we parse JSON first, then check for actual success based on content if status is 200.
-                
-                try:
-                    response_data = json.loads(response_text)
-                except json.JSONDecodeError as e:
-                    # If status is 200 but JSON is invalid, it's an issue.
-                    if response.status == 200:
-                        log_msg = f"JSONDecodeError for successful (200) {request_context}. Response text: '{response_text}'. Error: {str(e)}"
-                        logger.error(log_msg)
-                        return {'success': False, 'error': f"Invalid JSON response from Jupiter: {str(e)}", 'data': None}
-                    # If status is not 200 and JSON is invalid, prioritize HTTP error.
-                    response.raise_for_status() # This will raise for non-200 status, to be caught below.
-                    # Should not be reached if status is not 200, but as a fallback:
-                    return {'success': False, 'error': f"Non-JSON error response (HTTP {response.status}) and JSON decode failed: {response_text[:200]}", 'data': None}
-
-                logger.debug(f"Jupiter API Response from {url} (status {response.status}): {response_data}")
-
-                if response.status == 200:
-                    # For Jupiter, a 200 can still contain an error payload like `errorCode`
-                    if isinstance(response_data, dict) and response_data.get("errorCode"):
-                        error_message = response_data.get("message", "Jupiter API returned an error code.")
-                        full_error = f"{response_data.get('errorCode')}: {error_message}"
-                        logger.warning(f"Jupiter API success (200) but returned error payload: {full_error} for {request_context}. Payload: {response_data}")
-                        return {'success': False, 'error': full_error, 'data': response_data} # include data for inspection
-                    return {'success': True, 'error': None, 'data': response_data}
-                else:
-                    # Handle non-200 responses that might have a JSON body with error details
-                    error_message = f"Jupiter API Error (HTTP {response.status})"
-                    if isinstance(response_data, dict):
-                        detail = response_data.get("message", response_data.get("error", {}).get("message", str(response_data)))
-                        error_message += f": {detail}"
-                    else:
-                        error_message += f": {response_text[:200]}"
-                    logger.error(f"{error_message} for {request_context}")
-                    return {'success': False, 'error': error_message, 'data': response_data if isinstance(response_data, dict) else None}
-
-        except aiohttp.ClientResponseError as e: # Catches 4xx/5xx errors if raise_for_status() was hit or non-200 initially
-            log_msg = f"ClientResponseError (HTTP {e.status}) for {request_context}. Message: {e.message}. Response text: '{e.history[0].text if e.history and hasattr(e.history[0], 'text') else response_text if 'response_text' in locals() else ''}'"
-            logger.error(log_msg)
-            # Try to parse error from response_text if available
-            error_detail = e.message
-            if 'response_text' in locals():
-                try: 
-                    error_json = json.loads(response_text)
-                    error_detail = error_json.get("message", error_json.get("error", e.message))
-                except json.JSONDecodeError: pass # Stick with original e.message
-            return {'success': False, 'error': f"Jupiter API HTTP Error ({e.status}): {error_detail}", 'data': None}
-        except aiohttp.ClientError as e: # Other client-side errors
-            log_msg = f"ClientError for {request_context}. Error: {str(e)}"
-            logger.error(log_msg, exc_info=True)
-            return {'success': False, 'error': f"Jupiter Network/Client Error: {str(e)}", 'data': None}
-        except asyncio.TimeoutError:
-            log_msg = f"TimeoutError for {request_context}."
-            logger.error(log_msg, exc_info=True)
-            return {'success': False, 'error': "Jupiter API request timed out", 'data': None}
-        except Exception as e:
-            log_msg = f"Unexpected error during Jupiter API request for {request_context}. Error: {str(e)}"
-            logger.error(log_msg, exc_info=True)
-            return {'success': False, 'error': f"An unexpected error occurred with Jupiter API: {str(e)}", 'data': None}
+    # --- Methods for advanced order types (Limit, DCA) ---
+    # These would use self.jupiter_client for interaction with Jupiter API
+    # Placeholders for now, to be implemented based on todo/01-todo-core.md (Phase 3-4) or 03-todo-advanced-features.md

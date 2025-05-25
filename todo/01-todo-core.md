@@ -74,22 +74,28 @@
         -   [x] Définir `TradingError`, `SwapExecutionError`, `OrderPlacementError`.
         -   [x] Définir `SolanaTransactionError` (avec `signature`), et ses sous-types : `TransactionSimulationError`, `TransactionBroadcastError`, `TransactionConfirmationError`, `TransactionExpiredError`.
     -   [x] `app/utils/jupiter_api_client.py`:
-        -   [x] `_call_sdk_method`: Doit attraper les exceptions du SDK et les encapsuler dans `JupiterAPIError` (avec `original_exception`).
-        -   [x] `sign_and_send_transaction`: Doit lever `TransactionExpiredError`, `TransactionSimulationError`, `TransactionBroadcastError`, `TransactionConfirmationError` (avec la signature si disponible).
-        -   [x] Les autres méthodes (`get_quote`, `get_swap_transaction_data`, `get_prices`, etc.) doivent propager ou lever `JupiterAPIError`.
-        -   [x] Mettre à jour les types de retour des méthodes pour refléter qu'elles retournent directement les données du SDK ou lèvent des exceptions (plutôt que des dicts `{'success': ...}`).
+        -   [x] `_call_sdk_method`: Doit attraper les exceptions du SDK (ex: `JupiterPythonSdkException`, et autres exceptions spécifiques si documentées par le SDK) et les encapsuler dans `JupiterAPIError` (avec `original_exception`).
+        -   [x] `sign_and_send_transaction`: Doit lever `TransactionExpiredError`, `TransactionSimulationError`, `TransactionBroadcastError`, `TransactionConfirmationError` (qui sont des sous-types de `SolanaTransactionError`) comme spécifié.
+        -   [x] Les autres méthodes (`get_quote`, `get_swap_transaction_data`, `get_prices`, etc.) doivent propager `JupiterAPIError` levée par `_call_sdk_method` ou lever directement `JupiterAPIError` pour des erreurs de logique interne/validation de paramètres avant l'appel SDK.
+        -   [x] **Confirmation du Contrat d'Interface**: Les méthodes de `JupiterApiClient` lèvent des exceptions en cas d'erreur et retournent les données directes du SDK (ou un `Dict` standardisé si une transformation minimale est nécessaire) en cas de succès. Elles ne retournent PAS de dictionnaires `{'success': True/False, ...}`.
     -   [x] `app/market/market_data.py`:
-        -   [x] Les méthodes appelant `JupiterApiClient` (ex: `_get_jupiter_price`, `get_jupiter_swap_quote`) doivent attraper `JupiterAPIError` et retourner le dictionnaire standard `{'success': False, 'error': str(e), 'data': None, 'details': e}`.
-        -   [x] Les appels `aiohttp` directs (ex: pour DexScreener) doivent lever `DexScreenerAPIError` en cas d'échec.
-        -   [x] `get_token_price` et `get_token_info`: Mettre à jour pour attraper ces nouvelles exceptions custom et agréger les messages d'erreur de manière appropriée.
+        -   [x] Les méthodes appelant `JupiterApiClient` (ex: `_get_jupiter_price`, `_get_jupiter_token_info`, `get_jupiter_swap_quote`) **doivent attraper** `JupiterAPIError` (et potentiellement `SolanaTransactionError` si `MarketDataProvider` devait un jour initier des transactions, bien que ce ne soit pas son rôle actuel pour les quotes/prix).
+        -   [x] En cas d'exception attrapée depuis `JupiterApiClient`, ces méthodes de `MarketDataProvider` **transformeront l'exception en le dictionnaire standard** `{'success': False, 'error': str(e), 'data': None, 'details': e}`. Ceci maintient un contrat d'interface cohérent pour les utilisateurs de `MarketDataProvider` (comme `DexBot`), qui s'attendent à ce format de dictionnaire pour la gestion des erreurs de sources de données.
+        -   [x] Les appels `aiohttp` directs (ex: pour DexScreener) doivent lever `DexScreenerAPIError` en cas d'échec, qui sera ensuite attrapée par la méthode publique de `MarketDataProvider` l'utilisant et transformée de la même manière en `{'success': False, ...}`.
+        -   [x] `get_token_price` et `get_token_info`: Mettre à jour pour attraper `JupiterAPIError` et `DexScreenerAPIError` de leurs appels internes respectifs (`_get_jupiter_price`, appels à DexScreener) et retourner le format de dictionnaire standardisé, en agrégeant les messages d'erreur si plusieurs sources sont interrogées et échouent.
 -   [🚧] **1.6. `app/trading/trading_engine.py` (Robustification et Intégration Jupiter SDK)**
     -   [🚧] `TradingEngine.__init__`:
         -   [🚧] Initialiser `Config`.
         -   [🚧] Initialiser `JupiterApiClient` (passer la clé privée `config.SOLANA_PRIVATE_KEY_BS58`, l'URL RPC, et `config`).
         -   [🚧] `MarketDataProvider` peut être initialisé à `None` ici et instancié dans `__aenter__`.
+            -   **Rationale**: L'initialisation différée de `MarketDataProvider` (et d'autres clients potentiels avec des sessions `aiohttp` ou des connexions asynchrones) dans `__aenter__` est une pratique courante pour gérer correctement le cycle de vie des ressources asynchrones. `aiohttp.ClientSession` (utilisé par `MarketDataProvider` pour DexScreener et potentiellement d'autres appels HTTP directs) doit être créé au sein d'une boucle d'événements `asyncio` active. L'initialiser dans `__init__` (qui n'est pas `async`) peut conduire à des erreurs "Session created outside of an event loop".
+            -   En l'instanciant dans `__aenter__` (qui est `async`), on s'assure que la session est créée correctement. `__aexit__` se charge ensuite de fermer proprement la session.
+            -   **Accès par `DexBot`**: `DexBot`, qui est le principal utilisateur de `MarketDataProvider` pour agréger les données pour l'`AIAgent`, devrait également gérer `MarketDataProvider` via un contexte `async with MarketDataProvider() as mdp:` ou en s'assurant qu'une instance initialisée lui est fournie par un composant parent qui gère son cycle de vie (par exemple, si `DexBot` est lui-même géré par un contexte `async with`).
+            -   **Cohérence**: Si `TradingEngine` est toujours utilisé dans un contexte `async with` par ses appelants (comme `TradeExecutor` lorsqu'il exécute un trade), alors cette initialisation différée est cohérente. Si des méthodes de `TradingEngine` nécessitant `MarketDataProvider` devaient être appelées en dehors d'un tel contexte, cela nécessiterait une refonte de la gestion de l'instance `MarketDataProvider` pour s'assurer qu'elle est disponible et correctement initialisée (par exemple, via une méthode d'initialisation asynchrone explicite à appeler avant utilisation, ou en passant une instance initialisée).
+            -   **Simplification**: Pour l'instant, l'hypothèse est que `TradingEngine` et `DexBot` (ou leurs gestionnaires) instancient et gèrent `MarketDataProvider` dans des contextes `async` appropriés. `DexBot` créera sa propre instance de `MarketDataProvider` pour ses besoins de collecte de données, indépendamment de celle potentiellement utilisée (et gérée par son propre cycle de vie `__aenter__`/`__aexit__`) au sein de `TradingEngine` lors de l'exécution d'un trade.
+            -   [ ] **Revue Ultérieure (Optimisation)**: Évaluer la possibilité de centraliser la création et la gestion de `MarketDataProvider` et `JupiterApiClient` (par exemple, au niveau de `DexBot` ou d'un conteneur d'injection de dépendances) pour éviter des instances multiples, une fois l'architecture de base stabilisée.
     -   [🚧] `TradingEngine.__aenter__` / `__aexit__`:
-        -   [🚧] Gérer l'instanciation de `MarketDataProvider` dans `__aenter__`.
-        -   [🚧] Gérer l'appel à `self.jupiter_client.close_async_client()` dans `__aexit__`.
+        -   [🚧] Gérer l'instanciation de `MarketDataProvider` dans `__aenter__` si la stratégie est de le rendre spécifique à une session `TradingEngine`.
     -   [🚧] Nouvelle méthode privée `_execute_swap_attempt(input_token_mint, output_token_mint, amount_in_tokens_float, slippage_bps)`:
         -   [🚧] Contient la logique de base du swap : `market_data_provider.get_jupiter_swap_quote`, `jupiter_client.get_swap_transaction_data`, `jupiter_client.sign_and_send_transaction`.
         -   [🚧] Doit retourner la signature de la transaction (string) ou lever des exceptions (`JupiterAPIError`, `SolanaTransactionError` sous-types).
@@ -97,10 +103,11 @@
     -   [🚧] `TradingEngine.execute_swap` (méthode publique):
         -   [🚧] Gérer la conversion USD -> montant en tokens si `amount_in_usd` est fourni (utiliser `MarketDataProvider.get_token_price`).
         -   [🚧] Appeler `_execute_swap_attempt` dans un bloc `try...except`.
-        -   [🚧] Attraper `TransactionExpiredError` (après les reintentions de `_execute_swap_attempt`), `JupiterAPIError`, `SolanaTransactionError` (et ses sous-types), et d'autres `NumerusXBaseError` ou exceptions génériques.
+        -   [🚧] Attraper `TransactionExpiredError` (après les reintentions de `_execute_swap_attempt`). Si cette erreur persiste, cela indique que la quote et le blockhash ne sont plus valides. `DexBot` devrait idéalement être informé pour potentiellement rafraîchir toutes les données et redemander une décision à l'`AIAgent`. Attraper également `JupiterAPIError`, `SolanaTransactionError` (et ses sous-types), et d'autres `NumerusXBaseError` ou exceptions génériques. Ces erreurs doivent être journalisées de manière critique. `DexBot` peut décider de suspendre temporairement le trading sur la paire concernée ou d'alerter l'utilisateur.
         -   [🚧] Formater le dictionnaire final `{'success': ..., 'error': ..., 'signature': ..., 'details': ...}`.
         -   [🚧] Appeler `_record_transaction` avec le résultat.
     -   [🚧] Revoir et marquer comme obsolètes les anciennes méthodes `_get_swap_routes`, `_select_best_quote`, `_build_swap_transaction`, `_execute_transaction`, `_execute_fallback_swap`, `_make_jupiter_api_request` qui effectuaient des appels `aiohttp` directs à l'API Jupiter. Certaines logiques de sélection ou de préparation pourraient être réutilisées ou adaptées si le SDK ne les couvre pas entièrement. *(Note: Tooling issues prevented direct commenting/removal of these methods. They have been identified as obsolete.)*
+    -   [ ] **Méthodes Futures pour Ordres Avancés (Limite, DCA)**: S'assurer que les futures implémentations de méthodes publiques dans `TradingEngine` pour gérer les ordres Limite, DCA, etc. (ex: `place_limit_order`, `create_dca_plan`) utilisent les fonctionnalités correspondantes du `self.jupiter_client` (`JupiterApiClient`) et n'interagissent pas directement avec l'API HTTP de Jupiter.
 -   [x] **1.7. `app/dex_bot.py` (Ajustements Initiaux)**
     -   [x] (À déterminer si des ajustements sont nécessaires à ce stade, probablement minimes. La logique principale de trading sera revue en Phase 4). *(Note: Initial review suggests minimal changes currently needed due to existing abstractions. Deeper integration testing may reveal further needs.)*
 -   [x] **1.8. Fiabilisation de la Base de Données (`app/database.py`)**
@@ -136,6 +143,25 @@
         - [ ] Créer des endpoints pour que l'UI React puisse lire/écrire les configurations du bot stockées dans `app/config.py` (via des méthodes de `Config` qui lisent/écrivent dans un fichier de config utilisateur ou `.env`).
     - [ ] **1.10.4. Servir l'Application React (Optionnel, si pas géré par Nginx dans Docker)**:
         - [ ] Configurer FastAPI pour servir les fichiers statiques de l'application React buildée si une solution Nginx dédiée n'est pas utilisée en production.
+    - [ ] **1.10.5. Endpoints API REST Clés pour Actions Utilisateur et Sécurité (Nouveau)**:
+        - [ ] **Objectif**: Définir les endpoints API REST que le frontend React utilisera pour les actions utilisateur et clarifier la sécurisation.
+        - [ ] **Endpoints (Exemples à implémenter dans `app/api_routes.py` ou équivalent)**:
+            - [ ] `POST /api/v1/bot/start`: Démarre le bot.
+            - [ ] `POST /api/v1/bot/stop`: Arrête le bot.
+            - [ ] `POST /api/v1/bot/pause`: Met le bot en pause.
+            - [ ] `GET /api/v1/config`: Récupère la configuration actuelle du bot (parties non sensibles).
+            - [ ] `POST /api/v1/config`: Met à jour la configuration du bot (avec validation rigoureuse).
+            - [ ] `POST /api/v1/trades/manual`: Permet à l'utilisateur de soumettre un ordre manuel.
+            - [ ] `GET /api/v1/trades/history?limit=50&offset=0`: Récupère l'historique des trades.
+            - [ ] `GET /api/v1/ai/decisions/history?limit=50&offset=0`: Récupère l'historique des décisions de l'IA.
+            - [ ] `GET /api/v1/portfolio/snapshot`: Récupère un snapshot complet du portefeuille.
+            - [ ] `GET /api/v1/logs?service_name=<service>&limit=100`: Récupère les logs pour un service spécifique.
+            - [ ] `GET /api/v1/system/health`: Récupère l'état de santé agrégé des services.
+        - [ ] **Sécurité**:
+            - [ ] Tous les endpoints API REST seront sécurisés en utilisant des tokens JWT fournis par Clerk/Auth0 (ou le fournisseur d'identité choisi).
+            - [ ] FastAPI utilisera un middleware ou des dépendances pour valider le token JWT présent dans l'en-tête `Authorization` de chaque requête.
+            - [ ] La connexion Socket.io sera également authentifiée lors du handshake initial, potentiellement en passant le token JWT et en le validant côté serveur avant d'autoriser la connexion persistante.
+            - [ ] Des rôles et permissions (si définis dans Clerk/Auth0) pourraient être utilisés pour contrôler l'accès à certains endpoints sensibles.
 - [ ] **1.11. `requirements.txt` (Ajouts pour Backend UI)**
     - [ ] Ajouter `python-socketio`.
     - [ ] Ajouter `python-jose[cryptography]` et `passlib[bcrypt]` pour la gestion JWT si Clerk/Auth0 en a besoin côté backend ou si une authentification locale est envisagée en complément.
@@ -150,13 +176,51 @@
     - [ ] **1.12.2. `docker-compose.yml` (Mise à Jour)**:
         - [ ] Ajouter un nouveau service `frontend` basé sur `Docker/frontend/Dockerfile`.
         - [ ] Configurer le port mapping pour le service frontend (ex: `80:80` ou `3000:80`).
-        - [ ] S'assurer que le service backend (`app`) est accessible depuis le service frontend (gestion des réseaux Docker).
+        - [ ] S'assurer que le service backend (`app`) est accessible depuis le service frontend (gestion des réseaux Docker, ex: en utilisant les noms de service comme hostnames).
         - [ ] Mettre en place des volumes pour le développement local si nécessaire (ex: monter le code source de React pour le hot-reloading avec Vite pendant le dev, différent du build de prod).
+        - [ ] **Gestion des Variables d'Environnement**: Utiliser un fichier `.env` à la racine du projet NumerusX, qui sera implicitement chargé par `docker-compose up` ou explicitement défini via `env_file` dans `docker-compose.yml`. Chaque service pourra alors accéder aux variables nécessaires (ex: `REACT_APP_BACKEND_URL` pour le frontend, `GOOGLE_API_KEY` pour le backend) via la section `environment` de sa définition de service ou directement injectées lors du build du conteneur si ce sont des arguments de build.
     - [ ] **1.12.3. `Docker/backend/Dockerfile` ou `Dockerfile` racine (Ajustements)**:
         - [ ] Vérifier que le backend FastAPI expose correctement le port pour l'API et Socket.io.
         - [ ] S'assurer que les variables d'environnement pour la communication avec le frontend sont gérées.
-- [ ] **1.13. Suppression de `app/dashboard.py` et `app/gui.py`**
-    - [ ] Supprimer ces fichiers car l'UI est maintenant gérée par l'application React externe.
+    - [ ] **1.12.4. Configuration Nginx indicative pour le Frontend (Nouveau)**:
+        - [ ] **Objectif**: Fournir un exemple de configuration Nginx pour servir l'application React et gérer le proxy vers le backend.
+        - [ ] **Exemple de `nginx.conf` (ou partie pertinente dans `Docker/frontend/Dockerfile` ou un fichier de conf séparé copié dans l'image Nginx)**:
+            ```nginx
+            server {
+                listen 80;
+                server_name localhost; # Ou le domaine approprié
+
+                root /usr/share/nginx/html; # Où les fichiers buildés de React sont copiés
+                index index.html index.htm;
+
+                # Servir les fichiers statiques React
+                location / {
+                    try_files $uri $uri/ /index.html;
+                }
+
+                # Proxy pour les appels API vers le backend FastAPI
+                location /api {
+                    proxy_pass http://backend:8000; # 'backend' est le nom du service Docker backend, 8000 son port
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $scheme;
+                }
+
+                # Proxy pour les connexions WebSocket vers le backend FastAPI
+                location /socket.io {
+                    proxy_pass http://backend:8000/socket.io; # Assumant que le backend expose Socket.io sur le même port
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                }
+            }
+            ```
+        - [ ] Cette configuration Nginx doit être adaptée en fonction du port exposé par le backend FastAPI et du nom du service backend dans `docker-compose.yml`.
+- [x] **1.13. Suppression de `app/dashboard.py` et `app/gui.py`**
+    - [x] Supprimer ces fichiers car l'UI est maintenant gérée par l'application React externe.
 
 ## Phase 2: Développement du Cœur Agentique IA et Intégrations 🧠🤖
 
@@ -204,14 +268,13 @@ L'objectif principal de cette phase est de construire l'Agent IA central et de r
 - [x] **Fichiers concernés**: `app/strategy_framework.py`, `app/strategies/*`, `app/analytics_engine.py`, `app/prediction_engine.py`, `app/risk_manager.py`, `app/security/security.py`, `app/portfolio_manager.py`.
 
 ### 2.4. Intégration du Raisonnement de l'Agent dans la Base de Données et l'UI
-- [ ] **Tâche**: Stocker le "raisonnement" de l'Agent IA et l'afficher dans le dashboard.
+- [ ] **Tâche**: Stocker le "raisonnement" de l'Agent IA et l'afficher dans le dashboard (`numerusx-ui/`).
 - [ ] **Détails**:
     - [ ] Modifier `EnhancedDatabase` pour avoir une table ou une colonne pour stocker les logs de décision de l'Agent IA (inputs clés considérés, logique appliquée, score de confiance, décision finale).
     - [ ] `DexBot` enregistre ce raisonnement après chaque décision de l'`AIAgent`.
-    - [ ] **`app/dashboard.py`**: (Toutes les fonctionnalités UI sont détaillées dans `todo/01-todo-ui.md`)
-        - [ ] ~~Ajouter une section dans la vue "Trading Activity" ou une nouvelle vue "AI Agent Insights" pour afficher le raisonnement derrière chaque trade (ou décision de ne pas trader).~~ (Voir `todo/01-todo-ui.md`)
-        - [ ] ~~Afficher l'état actuel de l'Agent IA (ex: "Monitoring", "Processing Inputs", "Decision Made").~~ (Voir `todo/01-todo-ui.md`)
-- [ ] **Fichiers concernés**: `app/database.py`, `app/dex_bot.py`, `app/dashboard.py`, `todo/01-todo-ui.md`.
+    - [ ] **`numerusx-ui/` (Application React)**: (Les fonctionnalités UI sont détaillées dans `todo/01-todo-ui.md`)
+        - [ ] Implémenter les sections/composants nécessaires dans l'UI React pour afficher le raisonnement derrière chaque trade (ou décision de ne pas trader) et l'état actuel de l'Agent IA, en se basant sur les spécifications de `todo/01-todo-ui.md`.
+- [ ] **Fichiers concernés**: `app/database.py`, `app/dex_bot.py`, `numerusx-ui/` (et ses composants), `todo/01-todo-ui.md`.
 
 ## Phase 3: Logique de Trading Raffinée et Améliorations du Bot (Post-Agent IA) ⚙️
 
@@ -241,19 +304,10 @@ L'objectif principal de cette phase est de construire l'Agent IA central et de r
 
 Cette phase vise à enrichir l'expérience utilisateur et à introduire des capacités de trading plus sophistiquées.
 
-### 4.1. Amélioration de l'Interface Utilisateur (`app/dashboard.py`, `app/gui.py`)
-- [ ] **Tâche**: Développer un tableau de bord complet et réactif. (Détails complets et suivi dans `todo/01-todo-ui.md`)
-- [x] **Détails**:
-    - [x] S'inspirer de la structure proposée dans `todo.md` (et `todo-front.md`) pour `dashboard.py` (Portfolio Overview, Trading Activity, Market Analysis, Control Center, System Monitoring, Settings).
-    - [x] Utiliser `asyncio` pour les mises à jour en temps réel des données (solde, positions, graphiques).
-    - [x] Afficher une estimation des frais de transaction avant l'exécution manuelle d'un trade (UI placeholder).
-    - [x] Mettre en place un suivi en direct du statut des transactions (UI placeholder pour détails, trades table montre statut BD).
-    - [x] Visualiser les métriques de performance du bot (ROI, win rate, Sharpe, etc.) (Partiellement via graphiques et stats).
-    - [x] Fournir une vue détaillée du portefeuille (actifs détenus, valeur actuelle, P&L non réalisé) (Partiellement via graphiques et tables placeholders).
-- [ ] **Détails (Jupiter Ordres Avancés)**: (Couvert dans `todo/01-todo-ui.md`)
-    - [ ] ~~Ajouter des sections à l'UI pour afficher, créer, et gérer (annuler) les ordres limités et les plans DCA.~~
-    - [ ] ~~Visualiser le statut des ordres limités et des plans DCA actifs (ex: prochain cycle DCA, ordres limités en attente).~~
-- [x] **Fichiers concernés**: `app/dashboard.py` (amélioré), `app/gui.py` (considéré comme base ou obsolète si `dashboard.py` est principal), `todo/01-todo-ui.md`.
+### 4.1. Amélioration de l'Interface Utilisateur (`numerusx-ui/`)
+- [ ] **Tâche**: Développer les fonctionnalités du tableau de bord React comme défini dans `todo/01-todo-ui.md`.
+- [ ] **Détails**: Se référer à `todo/01-todo-ui.md` pour la liste complète des fonctionnalités et des étapes de développement de l'interface React.
+- [ ] **Fichiers concernés**: `numerusx-ui/` (ensemble du projet frontend), `todo/01-todo-ui.md`.
 
 ### 4.2. Implémentation de Stratégies de Trading Novatrices
 - [x] **Tâche**: Développer et intégrer plusieurs archétypes de stratégies.
@@ -358,6 +412,8 @@ Rappels pour l'IA:
 
 ## Phase 7: Intégration Jupiter API v6 (Détaillée)
 
+**Note**: Cette phase sert de référence consolidée et de guide global pour l'intégration de l'API Jupiter V6, en s'appuyant sur le `jupiter-python-sdk`. Beaucoup des tâches détaillées ici sont initialement définies et suivies dans la Phase 1. Cette section vise à assurer une vue d'ensemble cohérente de tous les aspects de l'intégration Jupiter.
+
 Cette phase détaille l'intégration spécifique de l'API Jupiter V6 en utilisant le `jupiter-python-sdk`. Plusieurs tâches ci-dessus ont été marquées pour cette intégration, cette section sert de référence consolidée et de guide pour ces modifications.
 
 ### 7.1. Configuration (`app/config.py` et `requirements.txt`)
@@ -369,46 +425,4 @@ Cette phase détaille l'intégration spécifique de l'API Jupiter V6 en utilisan
 - [ ] **Objectif**: Implémenter intégralement `JupiterApiClient` avec toutes les méthodes listées (get_quote, get_swap_transaction_data, sign_and_send_transaction, get_prices, get_token_info_list, create/execute/cancel/get_trigger_order, create/get/close_dca_plan).
 - [ ] **Points Clés**:
     - [ ] Utilisation correcte du `jupiter-python-sdk`.
-    - [ ] Gestion robuste des erreurs et `tenacity` pour les reintentions (via `_call_sdk_method` wrapper).
-    - [ ] Logique de signature correcte pour `VersionedTransaction` avec `solders` et `Keypair`.
-    - [ ] Clarification du flux `create_trigger_order` + `execute` pour l'API Trigger v1, et comment le SDK le gère.
-
-### 7.3. Orchestration des Données de Marché (`app/market/market_data.py`)
-- [ ] **Référence**: Tâche 1.4 (Jupiter API v6).
-- [ ] **Objectif**: Intégrer `JupiterApiClient` dans `MarketDataProvider` pour toutes les opérations liées à Jupiter (prix, infos token, quotes).
-- [ ] **Points Clés**:
-    - [ ] `MarketDataProvider` initialise et utilise une instance de `JupiterApiClient`.
-    - [ ] Les méthodes existantes sont refactorisées pour appeler le client Jupiter.
-    - [ ] La conversion `amount_in_tokens` <-> `amount_lamports` est gérée (nécessite les décimales du token, obtenues via `JupiterApiClient`).
-    - [ ] Maintien du cache et des mécanismes de fallback.
-
-### 7.4. Moteur d'Exécution des Trades (`app/trading/trading_engine.py`)
-- [ ] **Référence**: Tâche 1.6 (Jupiter API v6).
-- [ ] **Objectif**: Intégrer `JupiterApiClient` dans `TradingEngine` pour l'exécution des swaps, la gestion des ordres limités et des plans DCA.
-- [ ] **Points Clés**:
-    - [ ] `TradingEngine` initialise et utilise une instance de `JupiterApiClient`.
-    - [ ] Les méthodes de swap (`_get_jupiter_quote`, `_get_jupiter_swap_tx_data`, `_execute_jupiter_transaction`) sont refactorisées et orchestrées par `execute_swap`.
-    - [ ] Implémentation des nouvelles méthodes pour les ordres limités et DCA (`place_limit_order`, `create_dca_plan`, etc.).
-    - [ ] La gestion des frais de transaction et des paramètres de priorité est conforme aux options du SDK/API v6.
-
-### 7.5. Adaptation des Modules Consommateurs
-- [ ] **Référence**: Tâches 2.2 (Jupiter Ordres Avancés), 2.3 (Compatibilité Jupiter), 3.3 (Logique d'Exécution).
-- [ ] **Objectif**: S'assurer que `DexBot`, `AIAgent`, `TradeExecutor`, et les modules d'analyse sont compatibles avec les changements introduits par le nouveau client Jupiter.
-- [ ] **Points Clés**:
-    - [ ] L'Agent IA peut initier des ordres limités/DCA en construisant les `params_dict` pour `TradingEngine`.
-    - [ ] `TradeExecutor` interagit correctement avec les nouvelles méthodes de `TradingEngine`.
-    - [ ] Les formats de données (notamment prix, décimales) sont cohérents à travers les modules.
-
-### 7.6. Base de Données (`app/database.py`)
-- [🚧] **Référence**: Tâche 1.8 (Jupiter Ordres Avancés).
-- [x] **Objectif**: Mettre à jour le schéma de la base de données pour stocker les informations relatives aux ordres limités et plans DCA (statut, ID Jupiter, etc.).
-
-### 7.7. Interface Utilisateur (`app/dashboard.py`)
-- [ ] **Référence**: Tâche 4.1 (Jupiter Ordres Avancés).
-- [ ] **Objectif**: Ajouter des fonctionnalités à l'UI pour créer, afficher et gérer les ordres limités et les plans DCA. (Détails complets et suivi dans `todo/01-todo-ui.md`)
-
-**Considérations Importantes (Rappel de `02-todo-ai-jupiter.md`)**:
-* **Signature `VersionedTransaction`**: Crucial. Utiliser `solders`. Référencer les exemples du SDK.
-* **API Trigger `createOrder` + `execute`**: Clarifier le flux exact (si la création d'ordre est une tx à signer/envoyer avant l'exécution) basé sur la documentation SDK/API.
-* **Documentation SDK**: Se référer constamment à la documentation et aux exemples du `jupiter-python-sdk` pour l'utilisation correcte de ses méthodes et des paramètres attendus.
-* **Rate Limits sur `lite-api.jup.ag`**: Bien que non explicitement détaillées partout, supposer des limites plus strictes. Implémenter une gestion d'erreur robuste pour `HTTP 429` (via `tenacity` dans `JupiterApiClient`).
+    - [ ] Gestion robuste des erreurs et `tenacity`
