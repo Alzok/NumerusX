@@ -18,62 +18,44 @@
 -   **Objectif**: Ajouter les configurations nécessaires pour l'API Gemini.
 -   **Fichier Concerné**: `app/config.py`
 -   **Détails**:
-    -   [ ] Ajouter `GOOGLE_API_KEY` à la classe `Config`. Charger depuis les variables d'environnement.
-    -   [ ] Ajouter `GEMINI_MODEL_NAME` (ex: "gemini-1.5-flash-latest", ou un identifiant de modèle Vertex AI spécifique comme "projects/YOUR_PROJECT_ID/locations/YOUR_REGION/publishers/google/models/gemini-1.5-flash-001") à `Config`. Ce sera le nom exact passé à l'API.
-    -   [ ] Ajouter `GEMINI_API_TIMEOUT_SECONDS` (ex: 15-25 secondes, Gemini Flash est conçu pour être rapide) à `Config`.
-    -   [ ] Ajouter `GEMINI_MAX_TOKENS_INPUT` (ex: 4096) à `Config` et l'utiliser dans `GeminiClient` pour la configuration de génération.
-    -   [ ] S'assurer que la clé API n'est pas commitée (utilisation de `.env` et `python-dotenv`).
+    -   [x] Ajouter `GOOGLE_API_KEY` à la classe `Config`. Charger depuis les variables d'environnement (avec chiffrement).
+    -   [x] Ajouter `GEMINI_MODEL_NAME` (valeur: "gemini-2.5-flash-preview-05-20") à `Config`. Ce sera le nom exact passé à l'API.
+    -   [x] Ajouter `GEMINI_API_TIMEOUT_SECONDS` (défaut 30s) à `Config`.
+    -   [x] Ajouter `GEMINI_MAX_TOKENS_INPUT` (défaut 4096) à `Config`.
+    -   [x] S'assurer que la clé API n'est pas commitée (utilisation de `.env`, `python-dotenv` et `EncryptionUtil`).
 
 ### Tâche 1.2: Ajout de la Dépendance
 -   **Objectif**: Inclure la bibliothèque Python de Google pour Gemini.
 -   **Fichier Concerné**: `requirements.txt`
 -   **Détails**:
-    -   [ ] Ajouter `google-generativeai` (ou `google-cloud-aiplatform` si l'intégration se fait via Vertex AI) à `requirements.txt`. Vérifier la version recommandée pour Gemini 2.5 Flash.
+    -   [x] Ajouter `google-generativeai>=0.5.4` à `requirements.txt`.
 
 ## Phase 2: Client API Gemini
 
-### Tâche 2.1: Création du Client API Gemini
--   **Objectif**: Développer une classe cliente pour interagir avec l'API Gemini.
--   **Fichier Concerné**: `app/ai_agent/gemini_client.py` (Nouveau fichier dans `app/ai_agent/`)
--   **Détails**:
-    -   [ ] Créer une classe `GeminiClient`.
-    -   [ ] Initialiser le client avec la clé API et le nom du modèle depuis `Config`.
-        ```python
-        import google.generativeai as genai
-
-        class GeminiClient:
-            def __init__(self, api_key: str, model_name: str):
-                genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel(model_name)
-                # Configurer des safety_settings appropriés pour éviter des blocages trop stricts si le contenu financier est mal interprété.
-                self.safety_settings = [
-                    {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-                    {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"},
-                ]
-                self.generation_config = genai.types.GenerationConfig(
-                    # max_output_tokens=8192, # Flash a une grande fenêtre, mais spécifier pour la sortie
-                    temperature=0.2, # Plus déterministe pour les décisions financières
-                    # top_p=0.8, # Optionnel
-                    # top_k=40   # Optionnel
-                )
-        ```
-    -   [ ] Implémenter une méthode asynchrone `get_decision(self, structured_prompt: str, max_output_tokens: int = 1024) -> Dict[str, Any]`.
-        -   Cette méthode enverra le `structured_prompt` (qui sera un JSON string ou un objet Python converti en string pour le prompt) à l'API Gemini.
-        -   Elle utilisera `model.generate_content_async()` pour les appels asynchrones.
-        -   Elle devra gérer la réponse et extraire le texte pertinent.
-        -   Retourner une réponse structurée (ex: `{'success': True, 'decision_text': '...', 'usage_metadata': ...}`).
-    -   [ ] Inclure la gestion des timeouts configurée dans `Config`. (Note: la bibliothèque `google-generativeai` gère les timeouts via les paramètres de la requête ou la configuration du client HTTP sous-jacent. À vérifier lors de l'implémentation).
+### Tâche 2.1: Création du Client API Gemini [Initialisation]
+    -   [🚧] **Objectif**: Mettre en place la structure initiale de `GeminiClient` avec initialisation et une méthode `get_decision` de base.
+    -   [x] **Fichier Concerné**: `app/ai_agent/gemini_client.py` (Créé)
+    -   **Détails complétés dans cette étape**:
+        -   [x] Classe `GeminiClient` créée.
+        -   [x] `__init__` avec `Config`, initialisation `genai.GenerativeModel`, `safety_settings`, `generation_config`.
+        -   [x] Méthode `get_decision` asynchrone avec gestion de timeout, extraction de texte et `usage_metadata`, et gestion d'erreurs de base.
+        -   [x] Section `if __name__ == "__main__":` pour tests locaux.
+    -   **Prochaine étape (Tâche 2.2)**: Raffiner la gestion des erreurs spécifiques à l'API Gemini.
 
 ### Tâche 2.2: Gestion des Erreurs API dans le Client Gemini
 -   **Objectif**: Gérer les erreurs spécifiques à l'API Gemini.
 -   **Fichier Concerné**: `app/ai_agent/gemini_client.py`
 -   **Détails**:
-    -   [ ] Dans `get_decision`, intercepter les exceptions spécifiques de la bibliothèque Google (ex: `google.api_core.exceptions.GoogleAPIError`, `DeadlineExceeded`, `ResourceExhausted`, etc.).
-    -   [ ] Gérer les réponses de l'API qui indiquent un blocage par les filtres de sécurité (si `BLOCK_NONE` n'est pas suffisant ou si des problèmes persistent) et ajuster les `safety_settings` ou le prompt.
-    -   [ ] Retourner une réponse d'erreur structurée (ex: `{'success': False, 'error': 'Gemini API Error: ...', 'data': None}`).
-    -   [ ] Journaliser les erreurs API avec des détails pertinents (type d'erreur, message).
+    -   [x] **Objectif**: Gérer les erreurs spécifiques à l'API Gemini.
+    -   [x] **Fichier Concerné**: `app/ai_agent/gemini_client.py`
+    -   [x] **Détails**:
+        -   [x] Importé `google.api_core.exceptions as google_exceptions`.
+        -   [x] Dans `get_decision`, intercepté `asyncio.TimeoutError` et des exceptions Google spécifiques: `google_exceptions.InvalidArgument`, `google_exceptions.ResourceExhausted`, `google_exceptions.PermissionDenied`, `google_exceptions.ServiceUnavailable`, `google_exceptions.InternalServerError`.
+        -   [x] Intercepté également `genai.types.BlockedPromptException` et `genai.types.generation_types.StopCandidateException`.
+        -   [x] Ajout d'une vérification de `response.prompt_feedback.block_reason` et `response.candidates` pour détecter les blocages de contenu ou réponses vides, même sans exception levée.
+        -   [x] Chaque cas d'erreur retourne un dictionnaire `{'success': False, 'error': 'Message spécifique...', 'data': ...}` avec des détails pertinents.
+        -   [x] Les erreurs API sont journalisées avec `logger.error()` ou `logger.warning()` et `exc_info=True` pour la trace.
+        -   [x] Amélioration de la gestion des erreurs dans `__init__` également.
 
 ## Phase 3: Intégration avec `AIAgent` et Optimisation du Prompt
 
@@ -81,11 +63,15 @@
 -   **Objectif**: Adapter `AIAgent` pour qu'il utilise `GeminiClient` pour prendre ses décisions.
 -   **Fichier Concerné**: `app/ai_agent.py`
 -   **Détails**:
-    -   [ ] Importer et initialiser `GeminiClient` dans le constructeur de `AIAgent`.
-    -   [ ] La méthode `decide_trade(self, aggregated_inputs: Dict)` de `AIAgent` doit:
-        -   **Préparer un prompt unique et complet** à partir des `aggregated_inputs`. L'objectif est de faire un seul appel API par cycle de décision.
-        -   Appeler `self.gemini_client.get_decision(prompt_text)`.
-        -   Parser la réponse texte du LLM (qui devrait être un JSON structuré comme demandé dans le prompt) pour extraire la décision de trade et le raisonnement.
+    -   [🚧] **Objectif**: Adapter `AIAgent` pour qu'il utilise `GeminiClient` pour prendre ses décisions.
+    -   [x] **Fichier Concerné**: `app/ai_agent.py`
+    -   [x] **Détails**:
+        -   [x] Importé et initialisé `GeminiClient` dans le constructeur de `AIAgent`.
+        -   [x] La méthode `decide_trade(self, aggregated_inputs: Dict)` de `AIAgent` est maintenant `async`.
+        -   [ ] **Préparer un prompt unique et complet** à partir des `aggregated_inputs` (Placeholder ajouté, Tâche 3.2 pour détails).
+        -   [x] Appelle `await self.gemini_client.get_decision(prompt_text)`.
+        -   [x] Gère la réponse de `GeminiClient` (succès/échec). En cas d'échec, retourne un `HOLD` avec l'erreur.
+        -   [ ] Parser la réponse texte du LLM (Placeholder ajouté, Tâche 3.3 pour parsing robuste avec Pydantic).
 
     - [ ] **Gestion des Erreurs et Continuité du Cycle par `DexBot`**:
         - `GeminiClient` intercepte les erreurs API brutes (timeouts, rate limits, erreurs de contenu Gemini) et les encapsule en erreurs structurées (ex: `GeminiAPIError` avec des détails) ou retourne un objet de décision indiquant l'échec.
@@ -98,7 +84,7 @@
         - La priorité est d'assurer la continuité des opérations du bot et la préservation du capital, même si le module IA est temporairement indisponible.
 
 ### Tâche 3.2: Conception du Prompt Optimisé pour Gemini 2.5 Flash (Coût et Efficacité)
--   **Objectif**: Créer un prompt très structuré et concis pour le modèle Gemini Flash sélectionné (via `Config.GEMINI_MODEL_NAME`), afin d'obtenir des réponses précises tout en minimisant le nombre de tokens d'entrée et de sortie.
+-   **Objectif**: Créer un prompt très structuré et concis pour le modèle `gemini-2.5-flash-preview-05-20` (tel que défini dans `Config.GEMINI_MODEL_NAME`), afin d'obtenir des réponses précises tout en minimisant le nombre de tokens d'entrée et de sortie.
 -   **Fichier Concerné**: Logique de construction du prompt dans `app/ai_agent.py`.
 -   **Détails**:
     -   [ ] **Rôle et Contexte Principal**: Définir clairement que l'IA est un agent de trading pour NumerusX sur Solana, spécialisé dans l'analyse de multiples sources de données pour prendre des décisions d'achat, de vente ou de conservation.
@@ -106,7 +92,7 @@
         -   Fournir les `aggregated_inputs` sous forme de JSON stringifié ou d'une structure textuelle très claire et compacte.
         -   Exemple de structure d'input (à adapter et rendre concise) :
             ```text
-            ROLE: NumerusX Solana Trading Agent. Analyze the following data for SOL/USDC and provide a trading decision.
+            ROLE: NumerusX Solana Trading Agent (using gemini-2.5-flash-preview-05-20 model). Analyze the following data for SOL/USDC and provide a trading decision.
 
             CURRENT MARKET DATA (SOL/USDC):
             - Price: $165.30
@@ -153,6 +139,7 @@
             }
             Prioritize capital preservation. If data is conflicting or insufficient for a high-confidence trade, prefer HOLD.
             Be concise in your reasoning.
+            Ensure your output strictly follows the JSON format specified.
             ```
     -   [ ] **Structure Détaillée des `aggregated_inputs` (Exemple)**:
         -   L'objet `aggregated_inputs` transmis à `AIAgent.decide_trade()` sera un dictionnaire Python. Pour la construction du prompt Gemini, ce dictionnaire sera sérialisé en JSON (ou formaté en une chaîne de caractères structurée similaire).
@@ -320,15 +307,22 @@
 -   **Fichiers Concernés**: `app/ai_agent/gemini_client.py`, `app/logger.py`, potentiellement un nouveau module de monitoring.
 -   **Détails**:
     -   [ ] Si l'API Gemini fournit des informations sur l'utilisation des tokens dans sa réponse (`usage_metadata`), les extraire et les journaliser.
-    -   [ ] Calculer une estimation du coût par appel basé sur la tarification de Gemini 2.5 Flash (tokens d'entrée + tokens de sortie).
-        - [ ] Implémenter une fonction `_calculate_cost(self, usage_metadata)` dans `GeminiClient` basée sur les tarifs : entrée $0.50/million de tokens, sortie $1.50/million de tokens. Exemple :
+    -   [ ] Calculer une estimation du coût par appel basé sur la tarification de `gemini-2.5-flash-preview-05-20` (tel que configuré dans `Config.GEMINI_MODEL_NAME`).
+        - [ ] Implémenter une fonction `_calculate_cost(self, usage_metadata)` dans `GeminiClient` basée sur les tarifs indicatifs pour `gemini-1.5-flash-latest` (ces tarifs sont sujets à changement et doivent être vérifiés sur la documentation officielle de Google Cloud au moment de l'implémentation):
+            - Entrée: Exemple $0.35 par million de tokens (pour les premiers 128k tokens de contexte, puis $0.70 au-delà, à simplifier ou à rendre configurable si besoin).
+            - Sortie: Exemple $1.05 par million de tokens (pour les premiers 128k tokens de contexte, puis $2.10 au-delà).
+            - Pour une estimation simplifiée initiale, on peut utiliser les tarifs de base.
           ```python
           # Dans GeminiClient
-          # def _calculate_cost(self, usage_metadata): # Ou usage_dict si c'est ce que l'API retourne
-          #     input_tokens = usage_metadata.get('prompt_token_count', 0) # ou usage_metadata.get('input_tokens', 0)
-          #     output_tokens = usage_metadata.get('candidates_token_count', 0) # ou usage_metadata.get('output_tokens', 0)
-          #     input_cost = (input_tokens / 1_000_000) * 0.50
-          #     output_cost = (output_tokens / 1_000_000) * 1.50
+          # Exemple de tarification pour gemini-1.5-flash-latest (tarifs à confirmer et adapter):
+          # INPUT_COST_PER_MILLION_TOKENS = 0.35 # Pour contexte <= 128K
+          # OUTPUT_COST_PER_MILLION_TOKENS = 1.05 # Pour contexte <= 128K
+
+          # def _calculate_cost(self, usage_metadata): # Ou usage_metadata.get('input_tokens', 0)
+          #     input_tokens = usage_metadata.get('prompt_token_count', 0)
+          #     output_tokens = usage_metadata.get('candidates_token_count', 0)
+          #     input_cost = (input_tokens / 1_000_000) * INPUT_COST_PER_MILLION_TOKENS 
+          #     output_cost = (output_tokens / 1_000_000) * OUTPUT_COST_PER_MILLION_TOKENS
           #     return input_cost + output_cost
           ```
     -   [ ] Journaliser le coût estimé par décision.

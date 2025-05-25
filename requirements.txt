@@ -22,7 +22,7 @@ PyJWT==2.6.0
 base58==2.1.1
 talib-binary==0.4.24
 jupiter-python-sdk>=0.24.0
-google-generativeai>=0.5.0
+google-generativeai>=0.5.4
 gensim>=4.3.0
 shap>=0.41.0
 lime>=0.2.0
@@ -30,3 +30,5 @@ PyPortfolioOpt>=1.5.0
 Riskfolio-Lib>=4.0.0
 python-socketio>=5.8.0
 fastapi-limiter>=0.1.5
+aiohttp>=3.9.1
+async-timeout>=4.0.3

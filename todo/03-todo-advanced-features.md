@@ -751,7 +751,7 @@ Cette section détaille des idées d\'amélioration basées sur l\'analyse de r�
 
 ### 7.2. Analyse du Réseau des Développeurs pour Prédire les Corrélations de Prix
 - [ ] **Concept**: Modéliser un réseau où les cryptomonnaies sont des nœuds et les arêtes représentent les développeurs partagés (via contributions GitHub). Les projets avec des développeurs communs peuvent avoir des rendements corrélés.
-- [ ] **Avantages**: Facilite les stratégies de trading par paires/couverture, signaux précoces basés sur l\'activité des développeurs, évaluation de la robustesse des projets.
+- [ ] **Avantages**: Facilite les stratégies de trading par paires/couverture, signaux précoces basés sur l'activité des développeurs, évaluation de la robustesse des projets.
 - [ ] **Implémentation**:
     - [ ] **Données**: Contributeurs (API GitHub).
     - [ ] **Outils**: `NetworkX`, `Pandas`, `Matplotlib`.

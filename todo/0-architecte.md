@@ -24,6 +24,10 @@ graph TD
         UI["Interface Utilisateur React/ShadCN/UI<br>(numerusx-ui/)"]
     end
 
+    subgraph "Couche API Backend"
+        API_BACKEND["API Backend FastAPI<br>(app/main.py, app/api_routes.py)"]
+    end
+
     subgraph "Orchestration & Logique de Base"
         MAIN["Point d'Entrée<br>(app/main.py)"]
         BOT["Orchestrateur de Flux<br>(app/dex_bot.py)"]
@@ -70,8 +74,8 @@ graph TD
     end
 
     %% Liaisons
-    MAIN --> BOT
-    UI --> BOT
+    UI --> API_BACKEND
+    API_BACKEND --> BOT
 
     BOT --> CONFIG
     BOT --> LOGGER
@@ -145,7 +149,8 @@ Ce diagramme illustre le nouveau chemin critique d'une décision de trading.
 
 ```mermaid
 sequenceDiagram
-    participant UI as Dashboard
+    participant UI as Interface Utilisateur
+    participant APIBackend as API Backend (FastAPI)
     participant DexBot as OrchestrateurDeFlux
     participant MDP as MarketDataProvider
     participant StratInputs as FournisseursSignauxStratégie (SF, strategies/)
@@ -159,7 +164,10 @@ sequenceDiagram
     participant Solana as Réseau Solana
     participant DB as Database
 
-    Note over DexBot: Cycle de Décision Initié (périodique)
+    UI->>APIBackend: Action Utilisateur (ex: Démarrer Bot, Requête Données)
+    APIBackend->>DexBot: Transmettre Commande / Requête
+    
+    Note over DexBot: Cycle de Décision Initié (périodique ou sur commande)
     DexBot->>MDP: Demande Données Marché Actuelles
     MDP-->>DexBot: Données Marché (Prix, Volume...)
     
@@ -195,15 +203,18 @@ sequenceDiagram
             TradeExec->>PortMgr: record_trade_executed(details)
             TradeExec->>RiskMgr: add_position(details)
             TradeExec->>DB: record_trade(details), record_agent_decision(raisonnement)
-            DexBot->>UI: (Mise à jour via polling/WebSocket)
+            DexBot-->>APIBackend: Confirmer Succès Trade
+            APIBackend-->>UI: (Mise à jour via polling/WebSocket)
         else Trade Échoué
             DexBot->>DB: log_trade_failure(details, error), record_agent_decision(raisonnement)
-            DexBot->>UI: (Notification d'erreur)
+            DexBot-->>APIBackend: Notifier Échec Trade
+            APIBackend-->>UI: (Notification d'erreur)
         end
     else Pas d'Action de l'Agent IA
         DexBot->>DB: log_agent_no_action(raisonnement)
+        DexBot-->>APIBackend: Confirmer Pas d'Action
+        APIBackend-->>UI: (Mise à jour générale du dashboard)
     end
-    DexBot->>UI: (Mise à jour générale du dashboard)
 ```
 
 ## IV. Décomposition des Modules et Leurs Rôles Clés (avec Agent IA)
@@ -252,7 +263,7 @@ Les modules de cette couche sont redéfinis pour agir comme des fournisseurs d'i
 -   **`numerusx-ui/` (Nouvelle Application Frontend React)**:
     -   **Rôle**: Interface utilisateur moderne, réactive et riche en fonctionnalités pour le contrôle et la visualisation du bot NumerusX.
     -   **Technologies**: React, ShadCN/UI, Tailwind CSS, Recharts, Redux, Socket.io, Clerk/Auth0, i18next.
-    -   **Interactions**: Communique avec le backend (FastAPI) via des API REST et des WebSockets (Socket.io) pour les données en temps réel et les actions de contrôle. Les détails spécifiques des endpoints REST et des événements Socket.io sont documentés dans `todo/01-todo-ui.md` (Phase 4) et `todo/01-todo-core.md` (Tâches 1.10.1 et 1.10.5).
+    -   **Interactions**: Communique avec le backend (FastAPI, via `app/main.py` et les routes définies dans des modules comme `app/api_routes.py`) via des API REST et des WebSockets (Socket.io) pour les données en temps réel et les actions de contrôle. Les détails spécifiques des endpoints REST et des événements Socket.io sont documentés dans `todo/01-todo-ui.md` (Phase 4) et `todo/01-todo-core.md` (Tâches 1.10.1 et 1.10.5).
     -   Doit être capable d'afficher :
         -   Le raisonnement de l'Agent IA pour chaque trade.
         -   L'état de l'Agent IA.

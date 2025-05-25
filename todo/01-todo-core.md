@@ -15,8 +15,8 @@
     -   [x] `JUPITER_MAX_RETRIES` pour `JupiterApiClient`.
 -   [x] **1.1.bis. `requirements.txt`**
     -   [x] Ajouter `jupiter-python-sdk>=0.24.0`.
--   [ ] **1.2. `app/logger.py` (Optionnel - si des configurations spécifiques sont nécessaires pour Jupiter)**
-    -   [ ] (À déterminer si des ajustements sont nécessaires)
+-   [x] **1.2. `app/logger.py` (Optionnel - si des configurations spécifiques sont nécessaires pour Jupiter)**
+    -   [x] (Considéré comme non nécessaire pour l'instant, la journalisation standard suffit.)
 -   [x] **1.3. `app/utils/jupiter_api_client.py` (Nouveau Client API Jupiter SDK)**
     -   [x] Créer le fichier.
     -   [x] Implémenter `JupiterApiClient` en utilisant `jupiter-python-sdk`.
@@ -67,7 +67,7 @@
         -   [x] Appeler `self.jupiter_client.get_quote()` avec les paramètres corrects.
         -   [x] Retourner la réponse brute du SDK dans le champ `data` du dictionnaire standard.
         -   [x] Gérer `JupiterAPIError` et retourner le dict `{'success': False, ...}`.
-    -   [ ] Supprimer les anciennes méthodes `_fetch_jupiter_quote_v6`, `_fetch_jupiter_price_v4`, `_convert_jupiter_format` (basées sur `aiohttp`).
+    -   [x] Supprimer les anciennes méthodes `_fetch_jupiter_quote_v6`, `_fetch_jupiter_price_v4`, `_convert_jupiter_format` (basées sur `aiohttp`).
 -   [x] **1.5. Gestion des Erreurs (Améliorations Initiales)**
     -   [x] `app/utils/exceptions.py`:
         -   [x] Définir une hiérarchie d'exceptions custom: `NumerusXBaseError`, `APIError` (avec `api_name`, `status_code`), `JupiterAPIError`, `DexScreenerAPIError`, `GeminiAPIError`.
@@ -83,30 +83,24 @@
         -   [x] En cas d'exception attrapée depuis `JupiterApiClient`, ces méthodes de `MarketDataProvider` **transformeront l'exception en le dictionnaire standard** `{'success': False, 'error': str(e), 'data': None, 'details': e}`. Ceci maintient un contrat d'interface cohérent pour les utilisateurs de `MarketDataProvider` (comme `DexBot`), qui s'attendent à ce format de dictionnaire pour la gestion des erreurs de sources de données.
         -   [x] Les appels `aiohttp` directs (ex: pour DexScreener) doivent lever `DexScreenerAPIError` en cas d'échec, qui sera ensuite attrapée par la méthode publique de `MarketDataProvider` l'utilisant et transformée de la même manière en `{'success': False, ...}`.
         -   [x] `get_token_price` et `get_token_info`: Mettre à jour pour attraper `JupiterAPIError` et `DexScreenerAPIError` de leurs appels internes respectifs (`_get_jupiter_price`, appels à DexScreener) et retourner le format de dictionnaire standardisé, en agrégeant les messages d'erreur si plusieurs sources sont interrogées et échouent.
--   [🚧] **1.6. `app/trading/trading_engine.py` (Robustification et Intégration Jupiter SDK)**
-    -   [🚧] `TradingEngine.__init__`:
-        -   [🚧] Initialiser `Config`.
-        -   [🚧] Initialiser `JupiterApiClient` (passer la clé privée `config.SOLANA_PRIVATE_KEY_BS58`, l'URL RPC, et `config`).
-        -   [🚧] `MarketDataProvider` peut être initialisé à `None` ici et instancié dans `__aenter__`.
-            -   **Rationale**: L'initialisation différée de `MarketDataProvider` (et d'autres clients potentiels avec des sessions `aiohttp` ou des connexions asynchrones) dans `__aenter__` est une pratique courante pour gérer correctement le cycle de vie des ressources asynchrones. `aiohttp.ClientSession` (utilisé par `MarketDataProvider` pour DexScreener et potentiellement d'autres appels HTTP directs) doit être créé au sein d'une boucle d'événements `asyncio` active. L'initialiser dans `__init__` (qui n'est pas `async`) peut conduire à des erreurs "Session created outside of an event loop".
-            -   En l'instanciant dans `__aenter__` (qui est `async`), on s'assure que la session est créée correctement. `__aexit__` se charge ensuite de fermer proprement la session.
-            -   **Accès par `DexBot`**: `DexBot`, qui est le principal utilisateur de `MarketDataProvider` pour agréger les données pour l'`AIAgent`, devrait également gérer `MarketDataProvider` via un contexte `async with MarketDataProvider() as mdp:` ou en s'assurant qu'une instance initialisée lui est fournie par un composant parent qui gère son cycle de vie (par exemple, si `DexBot` est lui-même géré par un contexte `async with`).
-            -   **Cohérence**: Si `TradingEngine` est toujours utilisé dans un contexte `async with` par ses appelants (comme `TradeExecutor` lorsqu'il exécute un trade), alors cette initialisation différée est cohérente. Si des méthodes de `TradingEngine` nécessitant `MarketDataProvider` devaient être appelées en dehors d'un tel contexte, cela nécessiterait une refonte de la gestion de l'instance `MarketDataProvider` pour s'assurer qu'elle est disponible et correctement initialisée (par exemple, via une méthode d'initialisation asynchrone explicite à appeler avant utilisation, ou en passant une instance initialisée).
-            -   **Simplification**: Pour l'instant, l'hypothèse est que `TradingEngine` et `DexBot` (ou leurs gestionnaires) instancient et gèrent `MarketDataProvider` dans des contextes `async` appropriés. `DexBot` créera sa propre instance de `MarketDataProvider` pour ses besoins de collecte de données, indépendamment de celle potentiellement utilisée (et gérée par son propre cycle de vie `__aenter__`/`__aexit__`) au sein de `TradingEngine` lors de l'exécution d'un trade.
-            -   [ ] **Revue Ultérieure (Optimisation)**: Évaluer la possibilité de centraliser la création et la gestion de `MarketDataProvider` et `JupiterApiClient` (par exemple, au niveau de `DexBot` ou d'un conteneur d'injection de dépendances) pour éviter des instances multiples, une fois l'architecture de base stabilisée.
-    -   [🚧] `TradingEngine.__aenter__` / `__aexit__`:
-        -   [🚧] Gérer l'instanciation de `MarketDataProvider` dans `__aenter__` si la stratégie est de le rendre spécifique à une session `TradingEngine`.
-    -   [🚧] Nouvelle méthode privée `_execute_swap_attempt(input_token_mint, output_token_mint, amount_in_tokens_float, slippage_bps)`:
-        -   [🚧] Contient la logique de base du swap : `market_data_provider.get_jupiter_swap_quote`, `jupiter_client.get_swap_transaction_data`, `jupiter_client.sign_and_send_transaction`.
-        -   [🚧] Doit retourner la signature de la transaction (string) ou lever des exceptions (`JupiterAPIError`, `SolanaTransactionError` sous-types).
-        -   [🚧] Décorer avec `tenacity.retry` pour réessayer spécifiquement en cas de `TransactionExpiredError` (en utilisant `Config.JUPITER_MAX_RETRIES`).
-    -   [🚧] `TradingEngine.execute_swap` (méthode publique):
-        -   [🚧] Gérer la conversion USD -> montant en tokens si `amount_in_usd` est fourni (utiliser `MarketDataProvider.get_token_price`).
-        -   [🚧] Appeler `_execute_swap_attempt` dans un bloc `try...except`.
-        -   [🚧] Attraper `TransactionExpiredError` (après les reintentions de `_execute_swap_attempt`). Si cette erreur persiste, cela indique que la quote et le blockhash ne sont plus valides. `DexBot` devrait idéalement être informé pour potentiellement rafraîchir toutes les données et redemander une décision à l'`AIAgent`. Attraper également `JupiterAPIError`, `SolanaTransactionError` (et ses sous-types), et d'autres `NumerusXBaseError` ou exceptions génériques. Ces erreurs doivent être journalisées de manière critique. `DexBot` peut décider de suspendre temporairement le trading sur la paire concernée ou d'alerter l'utilisateur.
-        -   [🚧] Formater le dictionnaire final `{'success': ..., 'error': ..., 'signature': ..., 'details': ...}`.
-        -   [🚧] Appeler `_record_transaction` avec le résultat.
-    -   [🚧] Revoir et marquer comme obsolètes les anciennes méthodes `_get_swap_routes`, `_select_best_quote`, `_build_swap_transaction`, `_execute_transaction`, `_execute_fallback_swap`, `_make_jupiter_api_request` qui effectuaient des appels `aiohttp` directs à l'API Jupiter. Certaines logiques de sélection ou de préparation pourraient être réutilisées ou adaptées si le SDK ne les couvre pas entièrement. *(Note: Tooling issues prevented direct commenting/removal of these methods. They have been identified as obsolete.)*
+-   [x] **1.6. `app/trading/trading_engine.py` (Robustification et Intégration Jupiter SDK)**
+    -   [x] `TradingEngine.__init__`:
+        -   [x] Initialiser `Config`.
+        -   [x] Initialiser `JupiterApiClient` (passer la clé privée `config.SOLANA_PRIVATE_KEY_BS58`, l'URL RPC, et `config`).
+        -   [x] `MarketDataProvider` peut être initialisé à `None` ici et instancié dans `__aenter__`.
+    -   [x] `TradingEngine.__aenter__` / `__aexit__`:
+        -   [x] Gérer l'instanciation et le cycle de vie de `MarketDataProvider` (via `await self.market_data_provider.__aenter__()` et `__aexit__`) si `TradingEngine` en est responsable.
+    -   [x] Nouvelle méthode privée `_execute_swap_attempt(input_token_mint, output_token_mint, amount_in_tokens_float, slippage_bps)`:
+        -   [x] Contient la logique de base du swap : `self.market_data_provider.get_jupiter_swap_quote`, `self.jupiter_client.get_swap_transaction_data`, `self.jupiter_client.sign_and_send_transaction`.
+        -   [x] Doit retourner la signature de la transaction (string) ou lever des exceptions (`JupiterAPIError`, `SolanaTransactionError` sous-types).
+        -   [x] Décorer avec `tenacity.retry` pour réessayer spécifiquement en cas de `TransactionExpiredError` (en utilisant `Config.JUPITER_MAX_RETRIES`).
+    -   [x] `TradingEngine.execute_swap` (méthode publique):
+        -   [x] Gérer la conversion USD -> montant en tokens si `amount_in_usd` est fourni (utiliser `self.market_data_provider.get_token_price`).
+        -   [x] Appeler `_execute_swap_attempt` dans un bloc `try...except`.
+        -   [x] Attraper `TransactionExpiredError` (après les reintentions de `_execute_swap_attempt`). Si cette erreur persiste, cela indique que la quote et le blockhash ne sont plus valides. `DexBot` devrait idéalement être informé pour potentiellement rafraîchir toutes les données et redemander une décision à l'AIAgent. Attraper également `JupiterAPIError`, `SolanaTransactionError` (et ses sous-types), et d'autres `NumerusXBaseError` ou exceptions génériques. Ces erreurs doivent être journalisées de manière critique. `DexBot` peut décider de suspendre temporairement le trading sur la paire concernée ou d'alerter l'utilisateur.
+        -   [x] Formater le dictionnaire final `{'success': ..., 'error': ..., 'signature': ..., 'details': ...}`.
+        -   [x] Appeler `_record_transaction` avec le résultat.
+    -   [x] Revoir et marquer comme obsolètes les anciennes méthodes `_get_swap_routes`, `_select_best_quote`, `_build_swap_transaction`, `_execute_transaction`, `_execute_fallback_swap`, `_make_jupiter_api_request` qui effectuaient des appels `aiohttp` directs à l'API Jupiter. (Vérifié, ces méthodes ne sont plus présentes, elles ont été supprimées/refactorisées lors des étapes précédentes.)
     -   [ ] **Méthodes Futures pour Ordres Avancés (Limite, DCA)**: S'assurer que les futures implémentations de méthodes publiques dans `TradingEngine` pour gérer les ordres Limite, DCA, etc. (ex: `place_limit_order`, `create_dca_plan`) utilisent les fonctionnalités correspondantes du `self.jupiter_client` (`JupiterApiClient`) et n'interagissent pas directement avec l'API HTTP de Jupiter.
 -   [x] **1.7. `app/dex_bot.py` (Ajustements Initiaux)**
     -   [x] (À déterminer si des ajustements sont nécessaires à ce stade, probablement minimes. La logique principale de trading sera revue en Phase 4). *(Note: Initial review suggests minimal changes currently needed due to existing abstractions. Deeper integration testing may reveal further needs.)*
@@ -122,8 +116,20 @@
 -   [ ] **1.9. Tests Unitaires et d'Intégration (Initiaux)**
     -   [ ] `tests/test_config.py`: Vérifier le chargement des nouvelles constantes Jupiter.
     -   [ ] `tests/test_jupiter_api_client.py`: (Nouveau) Tests pour `JupiterApiClient` (mock des appels SDK et RPC).
-        -   [ ] Tester `get_quote`, `get_swap_transaction_data`, `sign_and_send_transaction` (cas succès et erreurs).
-        -   [ ] Tester la gestion des erreurs et la levée des exceptions custom.
+        -   [x] __init__
+        -   [x] get_quote
+        -   [x] get_swap_transaction_data
+        -   [x] sign_and_send_transaction (vérifier gestion erreurs spécifiques Solana)
+        -   [x] close_async_client
+        -   [ ] `get_prices`
+        -   [ ] `get_token_info_list`
+        -   [ ] `create_trigger_order` (et vérifier si le SDK `jupiter.trigger_create_order` existe et fonctionne)
+        -   [ ] `cancel_trigger_order` (et vérifier si le SDK `jupiter.trigger_cancel_order` existe et fonctionne)
+        -   [ ] `get_trigger_orders` (et vérifier si le SDK `jupiter.trigger_get_orders` existe et fonctionne)
+        -   [ ] `create_dca_plan` (et vérifier si le SDK `jupiter.dca_create` existe et fonctionne)
+        -   [ ] `get_dca_orders` (et vérifier si le SDK `jupiter.dca_get_orders` existe et fonctionne)
+        -   [ ] `close_dca_order` (et vérifier si le SDK `jupiter.dca_close` existe et fonctionne)
+        -   [ ] (Note: `execute_trigger_order` est retiré de la liste des tests directs car il n'est pas implémenté comme un appel SDK distinct dans `JupiterApiClient` pour le moment, l'action de création est supposée soumettre l'ordre. À valider lors de l'écriture des tests pour `create_trigger_order`.)
     -   [ ] `tests/test_market_data.py`: Mettre à jour pour mocker `JupiterApiClient` et tester les méthodes refactorisées.
     -   [ ] `tests/test_trading_engine.py`: Mettre à jour pour mocker `JupiterApiClient` et `MarketDataProvider`, tester `execute_swap` (succès, erreurs API, erreurs de transaction).
     -   [ ] `tests/test_database.py`: Vérifier l'enregistrement et la lecture des nouveaux champs de trade.
@@ -315,114 +321,11 @@ Cette phase vise à enrichir l'expérience utilisateur et à introduire des capa
     - [x] **Framework de Stratégie (`BaseStrategy`)**: Définir une classe `BaseStrategy` dans `app/strategy_framework.py` avec des méthodes communes (`analyze`, `generate_signal`, `get_parameters`, `get_name`).
     - [x] **Stratégie de Momentum (`MomentumStrategy`)**: Créer `app/strategies/momentum_strategy.py`. Implémenter une stratégie basée sur RSI et MACD.
     - [x] **Stratégie de Mean Reversion (`MeanReversionStrategy`)**: Créer `app/strategies/mean_reversion_strategy.py`. Implémenter une stratégie basée sur les Bandes de Bollinger.
-    - [x] **Système de sélection de stratégie (`StrategySelector`)**: Développer une classe `StrategySelector` dans `app/strategy_selector.py`. Permettre à `DexBot` d'utiliser différentes stratégies (via `StrategySelector`) en fonction des conditions de marché ou d'une configuration. Initialement, implémenter une sélection simple (ex: par défaut ou via `Config`). (DONE: Selector created, DexBot uses it for default strategy from Config)
+    - [x] **Système de sélection de stratégie (`StrategySelector`)**: Développer une classe `StrategySelector` dans `app/strategy_selector.py`. Permettre à `DexBot` d'utiliser différentes stratégies (via `StrategySelector`) en fonction des conditions de marché ou d'une configuration. Initialement, implémenter une sélection simple (ex: par défaut ou via `Config`). (DONE: Selector created, DexBot uses it for default strategy from Config. *Note: L'implémentation actuelle du `StrategySelector` charge une stratégie par défaut. L'objectif à terme, comme décrit dans `0-architecte.md`, est que `StrategySelector` puisse pré-sélectionner/filtrer un ensemble de signaux ou de stratégies pour l'AIAgent, et non pas seulement en sélectionner une unique.*)
     - [x] **Stratégie de Suivi de Tendance (`TrendFollowingStrategy`)**: Créer `app/strategies/trend_following_strategy.py`. Utiliser des moyennes mobiles (EMA, SMA) et potentiellement ADX.
     - [x] **Intégration et tests initiaux**: S'assurer que `DexBot` peut charger et exécuter ces stratégies. Mettre à jour `AdvancedTradingStrategy` pour qu'elle hérite de `BaseStrategy` et s'intègre dans ce framework. (DONE for Advanced, Momentum, MeanReversion, TrendFollowing; DexBot loads default via Selector)
 - [x] **Fichiers concernés**: `app/strategy_framework.py`, `app/strategies/`, `app/dex_bot.py`, `app/config.py`, `app/strategy_selector.py`.
 
 ### 4.3. Boucle de Confirmation par IA pour les Trades (OBSOLETE/REMPLACÉ PAR AGENT IA CENTRAL)
 - [ ] **Tâche**: ~~Intégrer une étape finale de validation par une IA rapide avant l'exécution d'un trade.~~
-- [ ] **Détails**: L'Agent IA est maintenant le décideur central. Ce concept est fusionné dans la logique de l'`AIAgent`.
-
-## Phase 5: Développement du Moteur de Prédiction Avancé (`prediction_engine.py` en tant que Fournisseur pour l'Agent IA)
-
-Cette phase se concentre sur la création d'un moteur de prédiction intelligent et adaptatif.
-
-### 5.1. Classification des Régimes de Marché
-- [ ] **Tâche**: Implémenter `MarketRegimeClassifier`.
-- [ ] **Détails**:
-    - [ ] Utiliser des indicateurs comme l'ADX (pour la force de la tendance), la largeur des Bandes de Bollinger (pour la volatilité) et le RSI (pour le momentum) pour classifier le marché en "trending", "ranging", ou "volatile".
-    - [ ] Permettre au `PricePredictor` de sélectionner différents modèles ou stratégies en fonction du régime détecté.
-
-### 5.2. Entraînement et Prédiction de Modèles ML
-- [ ] **Tâche**: Implémenter `PricePredictor`.
-- [ ] **Détails**:
-    - [ ] **Caractéristiques (Features)**: Utiliser des données OHLCV historiques, des indicateurs techniques (RSI, MACD, BB, volume Z-score, changements de prix) et potentiellement des données de sentiment.
-    - [ ] **Modèles**: Commencer avec `RandomForestRegressor` ou `GradientBoostingRegressor` de `scikit-learn`. Envisager `PyTorch` pour des modèles plus complexes (LSTM, Transformers) ultérieurement.
-    - [ ] **Normalisation**: Utiliser `StandardScaler` pour normaliser les features.
-    - [ ] **Entraînement**:\
-        - [ ] Implémenter `train_model` pour entraîner sur les données historiques.\
-        - [ ] Utiliser un découpage train/test (ex: 70/30) et envisager une validation croisée de type "walk-forward" pour les séries temporelles.\
-        - [ ] Sauvegarder les modèles entraînés (ex: avec `joblib`) et les scalers associés.
-    - [ ] **Prédiction**: Implémenter `predict_price` pour faire des prédictions sur de nouvelles données.
-    - [ ] **Gestion des modèles**: Charger les modèles existants au démarrage.
-
-### 5.3. Analyse de Sentiment
-- [ ] **Tâche**: Implémenter `SentimentAnalyzer`.
-- [ ] **Détails**:
-    - [ ] Intégrer des API pour récupérer des données de Twitter, Discord, Reddit (peut nécessiter des packages/API externes).
-    - [ ] Utiliser des techniques NLP basiques (ex: VADER, TextBlob) ou des modèles de sentiment plus avancés si possible.
-    - [ ] Agréger les scores de sentiment des différentes sources, en pondérant potentiellement par le volume de mentions ou la crédibilité de la source.
-    - [ ] Mettre en cache les résultats de sentiment pour éviter des appels API excessifs.
-
-### 5.4. Apprentissage par Renforcement (RL)
-- [ ] **Tâche**: Implémenter `ReinforcementLearner`.
-- [ ] **Détails**:
-    - [ ] Définir l'espace d'états (ex: métriques de performance récentes, volatilité du marché).
-    - [ ] Définir l'espace d'actions (ex: ajustements des paramètres de la stratégie principale ou des seuils de risque).
-    - [ ] Concevoir une fonction de récompense (ex: basée sur le ROI, le Sharpe ratio, la réduction du drawdown).
-    - [ ] Utiliser un algorithme RL simple (ex: Q-learning pour des espaces discrets) ou une librairie RL (ex: Stable Baselines3) pour des optimisations plus complexes.
-    - [ ] Mettre à jour périodiquement les paramètres de la stratégie en fonction des "actions" suggérées par l'agent RL.
-
-### 5.5. Réentraînement Automatique
-- [ ] **Tâche**: Mettre en place un mécanisme de réentraînement périodique des modèles ML.
-- [ ] **Détails**:
-    - [ ] Déclencher le réentraînement en fonction de métriques de performance (ex: si le win rate d'un modèle chute sous un seuil) ou sur une base temporelle (ex: chaque semaine).
-    - [ ] Utiliser les données de trading les plus récentes pour affiner les modèles.
-    - [ ] Journaliser les performances des modèles avant et après réentraînement.
-
-## Phase 6: Tests, Déploiement et Monitoring Continus (Centré sur l'Agent IA) 🚀
-
-### 6.1. Tests Unitaires et d'Intégration Approfondis
-- [ ] **Tâche**: Écrire des tests pour chaque module et pour les interactions entre modules.
-- [ ] **Détails**:
-    - [ ] Utiliser `pytest` ou `unittest`.
-    - [ ] Simuler les réponses API pour tester la logique de `market_data.py` et `trading_engine.py`.
-    - [ ] Tester les cas limites et les scénarios d'erreur.
-
-### 6.2. Configuration du Déploiement Docker
-- [ ] **Tâche**: Optimiser et sécuriser la configuration Docker.
-- [ ] **Détails**:
-    - [ ] S'assurer que `docker-compose.yml` est configuré pour différents environnements (dev, prod) si nécessaire.
-    - [ ] Gérer les secrets (clés API, clés de portefeuille) de manière sécurisée en production (ex: via les secrets Docker ou des variables d'environnement injectées).
-    - [ ] Optimiser la taille de l'image Docker.
-
-### 6.3. Monitoring et Alerting
-- [ ] **Tâche**: Mettre en place un système de monitoring et d'alerting.
-- [ ] **Détails**:
-    - [ ] Journaliser les métriques clés de performance (ROI, erreurs, latence des transactions) dans un format structuré.
-    - [ ] Configurer des alertes (ex: via email, Telegram, Discord) pour les erreurs critiques, les drawdowns importants, ou les échecs de transaction répétés.
-
-### 6.4. Centralisation de l'État des Erreurs des Services (Nouveau)
-- [ ] **Tâche**: Mettre en place un mécanisme pour centraliser et exposer l'état de santé et les erreurs des services clés.
-- [ ] **Objectif**: Permettre à l'UI et à d'autres systèmes de monitoring d'obtenir une vue claire et actualisée des erreurs par composant.
-- [ ] **Détails**:
-    - [ ] Définir une structure standard pour les rapports d'état des services (ex: `{'service_name': 'MarketDataProvider', 'status': 'ERROR', 'last_error_message': 'API rate limit exceeded', 'timestamp': ...}`).
-    - [ ] Chaque service majeur (`MarketDataProvider`, `TradingEngine`, `AIAgent`, `Database`, `JupiterApiClient`) devra pouvoir rapporter son état et ses erreurs récentes à un point central.
-    - [ ] Ce point central (potentiellement une nouvelle classe `ServiceHealthMonitor` ou une responsabilité de `DexBot`) agrégera ces informations.
-    - [ ] Exposer ces informations agrégées (par exemple, via une méthode que `DexBot` rend accessible ou un simple état interne) pour que l'UI puisse les interroger et alimenter le panneau "System Health & Operations".
-- [ ] **Fichiers concernés**: `app/dex_bot.py` (potentiellement), `app/market/market_data.py`, `app/trading/trading_engine.py`, `app/ai_agent.py`, `app/utils/jupiter_api_client.py`, `app/database.py`, (potentiellement nouveau `app/service_health_monitor.py`).
-
-Rappels pour l'IA:
-- **Prioriser la robustesse**: L'Agent IA doit gérer des inputs variés et potentiellement manquants.
-- **Modularité**: L'Agent IA doit pouvoir intégrer de nouvelles sources d'input facilement.
-- **Journalisation Détaillée**: Les décisions de l'Agent IA DOIVENT être traçables.
-- **Sécurité Avant Tout**: Protéger les clés API et les fonds.
-- **Tests Continus**: Tester l'Agent IA avec des scénarios d'inputs variés.
-
-## Phase 7: Intégration Jupiter API v6 (Détaillée)
-
-**Note**: Cette phase sert de référence consolidée et de guide global pour l'intégration de l'API Jupiter V6, en s'appuyant sur le `jupiter-python-sdk`. Beaucoup des tâches détaillées ici sont initialement définies et suivies dans la Phase 1. Cette section vise à assurer une vue d'ensemble cohérente de tous les aspects de l'intégration Jupiter.
-
-Cette phase détaille l'intégration spécifique de l'API Jupiter V6 en utilisant le `jupiter-python-sdk`. Plusieurs tâches ci-dessus ont été marquées pour cette intégration, cette section sert de référence consolidée et de guide pour ces modifications.
-
-### 7.1. Configuration (`app/config.py` et `requirements.txt`)
-- [ ] **Référence**: Tâches 1.1 (Jupiter API v6) et 1.1.bis.
-- [ ] **Objectif**: S'assurer que toutes les constantes d'URL, les paramètres de transaction pour Jupiter, et la dépendance SDK sont correctement définis.
-
-### 7.2. Client API Jupiter (`app/utils/jupiter_api_client.py`)
-- [ ] **Référence**: Tâche 1.3.
-- [ ] **Objectif**: Implémenter intégralement `JupiterApiClient` avec toutes les méthodes listées (get_quote, get_swap_transaction_data, sign_and_send_transaction, get_prices, get_token_info_list, create/execute/cancel/get_trigger_order, create/get/close_dca_plan).
-- [ ] **Points Clés**:
-    - [ ] Utilisation correcte du `jupiter-python-sdk`.
-    - [ ] Gestion robuste des erreurs et `tenacity`
+- [ ] **Détails**: L'Agent IA est maintenant le décideur central. Ce concept est fusionné dans la logique de l'`

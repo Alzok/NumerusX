@@ -289,6 +289,17 @@ class Config:
     PREDICTION_MODEL_DIR = os.getenv("PREDICTION_MODEL_DIR", "models")
     PREDICTION_DATA_DIR = os.getenv("PREDICTION_DATA_DIR", "data/prediction_data")
 
+    # Configuration Google Gemini API
+    ENCRYPTED_GOOGLE_API_KEY = os.getenv("ENCRYPTED_GOOGLE_API_KEY")
+    _decrypted_google_api_key = EncryptionUtil.decrypt(ENCRYPTED_GOOGLE_API_KEY) if ENCRYPTED_GOOGLE_API_KEY else None
+    GOOGLE_API_KEY = _decrypted_google_api_key if _decrypted_google_api_key else os.getenv("GOOGLE_API_KEY")
+    if ENCRYPTED_GOOGLE_API_KEY and not _decrypted_google_api_key:
+        encryption_logger.warning("ENCRYPTED_GOOGLE_API_KEY is set but decryption failed. Falling back to GOOGLE_API_KEY if available.")
+    
+    GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash-preview-05-20")
+    GEMINI_API_TIMEOUT_SECONDS = int(os.getenv("GEMINI_API_TIMEOUT_SECONDS", "30")) # Increased default
+    GEMINI_MAX_TOKENS_INPUT = int(os.getenv("GEMINI_MAX_TOKENS_INPUT", "4096")) # Consider Gemini 2.5 Flash context window
+
     # Configuration des Stratégies
     DEFAULT_STRATEGY_NAME = os.getenv("DEFAULT_STRATEGY_NAME", AdvancedTradingStrategy().get_name()) # Default to AdvancedTradingStrategy
 
