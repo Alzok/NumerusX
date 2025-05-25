@@ -21,3 +21,4 @@ passlib==1.7.4
 PyJWT==2.6.0
 base58==2.1.1
 talib-binary==0.4.24
+jupiter-python-sdk>=0.24.0

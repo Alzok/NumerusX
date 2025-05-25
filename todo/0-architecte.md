@@ -21,7 +21,7 @@ Ce diagramme illustre les principaux composants de NumerusX et leurs interaction
 ```mermaid
 graph TD
     subgraph "Utilisateur & Contrôle Externe"
-        UI["Interface Utilisateur NiceGUI<br>(app/dashboard.py)"]
+        UI["Interface Utilisateur React/ShadCN/UI<br>(numerusx-ui/)"]
     end
 
     subgraph "Orchestration & Logique de Base"
@@ -30,11 +30,11 @@ graph TD
         CONFIG["Configuration<br>(app/config.py)"]
         LOGGER["Journalisation<br>(app/logger.py)"]
         DB["Base de Données SQLite<br>(app/database.py)"]
+        JUP_CLIENT["JupiterApiClient<br>(app/utils/jupiter_api_client.py)"]
     end
 
     subgraph "Fournisseurs de Données & Signaux"
         MDP["Fournisseur de Données de Marché<br>(app/market/market_data.py)"]
-        EXT_JUP["API Jupiter"]
         EXT_DEX["API DexScreener"]
         EXT_SOCIAL["APIs Sociales/News (Future)"]
         
@@ -50,7 +50,7 @@ graph TD
     end
 
     subgraph "Noyau Décisionnel Intelligent"
-        AI_AGENT["<<Agent IA Décisionnel Central>>\n(app/ai_agent.py)"]
+        AI_AGENT["<<Agent IA Décisionnel Central>>\n(app/ai_agent.py)\n(Implémentation via Gemini)"]
     end
     
     subgraph "Contrôle & Validation Pré-Trade"
@@ -78,7 +78,7 @@ graph TD
     BOT --> DB
 
     BOT --> MDP
-    MDP --> EXT_JUP
+    MDP --> JUP_CLIENT
     MDP --> EXT_DEX
     MDP --> EXT_SOCIAL
 
@@ -117,10 +117,9 @@ graph TD
 
     EXEC --> TE
     EXEC --> PORTFOLIO
-    %% Mise à jour post-trade
     EXEC --> RISK
-    %% Mise à jour post-trade
-    TE --> SOL
+    TE --> JUP_CLIENT
+    JUP_CLIENT --> SOL
 
     BACKTEST --> MDP
     BACKTEST --> SF
@@ -189,7 +188,7 @@ sequenceDiagram
     alt Ordre de Trade Actif
         DexBot->>TradeExec: execute_trade_order(ordre_agent_ia)
         TradeExec->>TradingEng: execute_swap_from_order(ordre_agent_ia)
-        TradingEng->>Solana: Soumettre Transaction
+        TradingEng->>Solana: Soumettre Transaction (via Jupiter Swap Transaction)
         Solana-->>TradingEng: Statut Transaction
         TradingEng-->>TradeExec: Résultat Exécution
         alt Trade Réussi
@@ -210,7 +209,7 @@ sequenceDiagram
 ## IV. Décomposition des Modules et Leurs Rôles Clés (avec Agent IA)
 
 ### A. Couche d'Acquisition et de Gestion des Données (Globalement Inchangée)
--   `app/market/market_data.py` (`MarketDataProvider`)
+-   `app/market/market_data.py` (`MarketDataProvider`): Utilise `JupiterApiClient` pour les données Jupiter.
 -   `app/database.py` (`EnhancedDatabase`): Stockera aussi les décisions et raisonnements de l'Agent IA.
 
 ### B. Couche de Génération de Features et Signaux (Anciennement Analyse et IA)
@@ -227,7 +226,7 @@ sequenceDiagram
 ### C. Couche Noyau Décisionnel Intelligent (Nouveau)
 
 -   **`app/ai_agent.py` (`AIAgent`)**:
-    -   **Rôle**: Le nouveau cœur décisionnel. Reçoit tous les inputs pertinents (données de marché, signaux des stratégies, prédictions IA, contraintes de risque/sécurité, état du portefeuille).
+    -   **Rôle**: Le nouveau cœur décisionnel. Reçoit tous les inputs pertinents (données de marché, signaux des stratégies, prédictions IA, contraintes de risque/sécurité, état du portefeuille). L'implémentation initiale s'appuiera sur un modèle LLM avancé (ex: Google Gemini).
     -   **Logique Interne**: Contient la logique (ML, RL, ensemble de modèles, heuristiques avancées) pour synthétiser ces inputs et générer un ordre de trade final et optimal.
     -   **Output**: Ordre de trade précis ou décision de ne pas trader, accompagné d'un "raisonnement" loggable.
     -   **Interactions**: Reçoit des données de multiples modules via `DexBot`. Retourne sa décision à `DexBot`.
@@ -245,17 +244,25 @@ sequenceDiagram
 
 ### E. Couche d'Exécution (Globalement Inchangée)
 -   `app/trade_executor.py` (`TradeExecutor`): Exécute l'ordre spécifique fourni par `DexBot` (qui vient de l'`AIAgent`).
--   `app/trading/trading_engine.py` (`TradingEngine`)
+-   `app/trading/trading_engine.py` (`TradingEngine`): Interagit avec le réseau Solana, notamment via `JupiterApiClient` pour les opérations sur les DEXs Jupiter (swaps, ordres limités, etc., en utilisant le `jupiter-python-sdk`).
 
 ### F. Couche de Présentation et Contrôle (UI)
--   **`app/dashboard.py` (`NumerusXDashboard`)**: Devra être adapté pour afficher :
-    -   Le raisonnement de l'Agent IA pour chaque trade.
-    -   L'état de l'Agent IA.
-    -   Potentiellement des visualisations des inputs clés que l'Agent a considérés.
+-   **`numerusx-ui/` (Nouvelle Application Frontend React)**:
+    -   **Rôle**: Interface utilisateur moderne, réactive et riche en fonctionnalités pour le contrôle et la visualisation du bot NumerusX.
+    -   **Technologies**: React, ShadCN/UI, Tailwind CSS, Recharts, Redux, Socket.io, Clerk/Auth0, i18next.
+    -   **Interactions**: Communique avec le backend (FastAPI) via des API REST et des WebSockets (Socket.io) pour les données en temps réel et les actions de contrôle.
+    -   Doit être capable d'afficher :
+        -   Le raisonnement de l'Agent IA pour chaque trade.
+        -   L'état de l'Agent IA.
+        -   Potentiellement des visualisations des inputs clés que l'Agent a considérés.
+        -   Tous les panneaux et fonctionnalités décrits dans `todo/01-todo-ui.md`.
+-   **Suppression de `app/dashboard.py` et `app/gui.py`**: Ces modules basés sur NiceGUI sont remplacés par la nouvelle application frontend React.
 
 ### G. Utilitaires et Monitoring (Globalement Inchangés)
 -   `app/config.py` (`Config`)
 -   `app/logger.py` (`DexLogger`)
+-   **Nouveau Rôle Important**: `app/utils/jupiter_api_client.py` (`JupiterApiClient`):
+    -   **Rôle**: Client centralisé pour toutes les interactions avec l'API Jupiter v6 en utilisant le `jupiter-python-sdk`. Fournit des méthodes pour les cotations, swaps, ordres limités, DCA, etc., aux modules `MarketDataProvider` et `TradingEngine`. Gère la communication directe avec le réseau Solana pour l'envoi des transactions construites par le SDK Jupiter.
 
 ## V. Stratégies de Performance et de Coordination
 

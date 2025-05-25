@@ -8,6 +8,11 @@ from cachetools import TTLCache
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.config import Config
+from app.utils.jupiter_api_client import JupiterApiClient
+from app.utils.exceptions import (
+    JupiterAPIError, DexScreenerAPIError, SolanaTransactionError, 
+    TransactionExpiredError, NumerusXBaseError
+)
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -22,6 +27,28 @@ class MarketDataProvider:
         Utilise les paramètres de cache et de rate limit depuis Config.
         """
         self.session = None
+        self.config = Config() # Store config instance
+
+        # Initialize JupiterApiClient
+        # It's crucial that SOLANA_PRIVATE_KEY_BS58 and SOLANA_RPC_URL are correctly set in Config
+        # The TODO suggests a WALLET_PRIVATE_KEY_BS58_FOR_DATA_API for data-only operations.
+        # We'll use the general SOLANA_PRIVATE_KEY_BS58 for now, assuming it has sufficient permissions
+        # or that a specific data API key will be added to Config later if needed.
+        self.jupiter_client: Optional[JupiterApiClient] = None
+        if self.config.SOLANA_PRIVATE_KEY_BS58 and self.config.SOLANA_RPC_URL:
+            try:
+                self.jupiter_client = JupiterApiClient(
+                    private_key_bs58=self.config.SOLANA_PRIVATE_KEY_BS58, # Or a specific data API key from config
+                    rpc_url=self.config.SOLANA_RPC_URL,
+                    config=self.config
+                )
+                logger.info("JupiterApiClient initialized successfully in MarketDataProvider.")
+            except Exception as e:
+                logger.error(f"Failed to initialize JupiterApiClient in MarketDataProvider: {e}", exc_info=True)
+                # Proceeding without jupiter_client, Jupiter-dependent methods will fail gracefully.
+        else:
+            logger.warning("JupiterApiClient cannot be initialized in MarketDataProvider: SOLANA_PRIVATE_KEY_BS58 or SOLANA_RPC_URL missing in Config.")
+
         # Cache pour les différents types de données
         self.price_cache = TTLCache(maxsize=Config.MARKET_DATA_CACHE_MAX_SIZE, ttl=Config.MARKET_DATA_CACHE_TTL_SECONDS)
         self.token_info_cache = TTLCache(maxsize=Config.MARKET_DATA_CACHE_MAX_SIZE, ttl=Config.MARKET_DATA_CACHE_TTL_SECONDS * 5)
@@ -68,37 +95,53 @@ class MarketDataProvider:
         cache_key = f"{token_address}_{reference_token}_price"
         cached_value = self.price_cache.get(cache_key)
         if cached_value:
-            # Assuming cached value is already in the final desired format {'price': ..., 'source': ...}
             return {'success': True, 'error': None, 'data': cached_value}
             
-        final_error_message = "Impossible d'obtenir le prix pour {token_address} depuis toutes les sources."
+        final_errors = [] # Collect error messages from different sources
         
         # Essayer Jupiter d'abord
-        logger.debug(f"Fetching price for {token_address} from Jupiter")
-        jupiter_result = await self._get_jupiter_price(token_address, reference_token)
-        
-        if jupiter_result.get('success'):
-            self.price_cache[cache_key] = jupiter_result['data'] # Cache only the data part
-            return jupiter_result
-        else:
-            logger.warning(f"Échec de la récupération du prix depuis Jupiter pour {token_address}: {jupiter_result.get('error')}")
-            final_error_message += f" Jupiter: {jupiter_result.get('error')}"
+        try:
+            logger.debug(f"Fetching price for {token_address} from JupiterSDK")
+            jupiter_result = await self._get_jupiter_price(token_address, reference_token)
+            if jupiter_result.get('success'):
+                self.price_cache[cache_key] = jupiter_result['data']
+                return jupiter_result
+            else:
+                final_errors.append(f"JupiterSDK: {jupiter_result.get('error', 'Unknown error from JupiterSDK')}")
+                logger.warning(f"Failed to get price from JupiterSDK for {token_address}: {jupiter_result.get('error')}")
+        except JupiterAPIError as e:
+            final_errors.append(f"JupiterSDK Error: {str(e)}")
+            logger.warning(f"JupiterAPIError for {token_address} price: {e}")
+        except Exception as e: # Catch any other unexpected error from _get_jupiter_price itself
+            final_errors.append(f"JupiterSDK Unexpected Error: {str(e)}")
+            logger.error(f"Unexpected error in _get_jupiter_price call for {token_address}: {e}", exc_info=True)
 
         # Fallback sur DexScreener
-        logger.debug(f"Fetching price for {token_address} from DexScreener (fallback)")
-        dexscreener_result = await self._get_dexscreener_price(token_address) # DexScreener usually gives USD price
-        
-        if dexscreener_result.get('success'):
-            # DexScreener might not know the reference_token, ensure data matches expectation or adapt
-            # For now, assume _get_dexscreener_price returns data in the expected format if successful
-            self.price_cache[cache_key] = dexscreener_result['data'] # Cache only the data part
-            return dexscreener_result
-        else:
-            logger.warning(f"Échec de la récupération du prix depuis DexScreener pour {token_address}: {dexscreener_result.get('error')}")
-            final_error_message += f" DexScreener: {dexscreener_result.get('error')}"
+        try:
+            logger.debug(f"Fetching price for {token_address} from DexScreener (fallback)")
+            # _get_dexscreener_price now raises DexScreenerAPIError on failure
+            dexscreener_result_data = await self._get_dexscreener_price(token_address)
+            # If _get_dexscreener_price returns successfully, it implies success is True
+            # and data is in dexscreener_result_data['data']
+            if dexscreener_result_data.get('success'): # Check for safety, though it should raise on error
+                self.price_cache[cache_key] = dexscreener_result_data['data']
+                return dexscreener_result_data # This is already {'success': True, 'data': ...}
+            else:
+                # This path might not be hit if _get_dexscreener_price always raises on error
+                final_errors.append(f"DexScreener: {dexscreener_result_data.get('error', 'Unknown error from DexScreener after successful call')}")
+                logger.warning(f"_get_dexscreener_price returned success=false for {token_address}: {dexscreener_result_data.get('error')}")
+
+        except DexScreenerAPIError as e:
+            final_errors.append(f"DexScreener Error: {str(e)}")
+            logger.warning(f"DexScreenerAPIError for {token_address} price: {e}")
+        except Exception as e: # Catch any other unexpected error
+            final_errors.append(f"DexScreener Unexpected Error: {str(e)}")
+            logger.error(f"Unexpected error in _get_dexscreener_price call for {token_address}: {e}", exc_info=True)
             
-        logger.error(final_error_message.format(token_address=token_address))
-        return {'success': False, 'error': final_error_message.format(token_address=token_address), 'data': None}
+        # If all sources failed
+        full_error_message = f"Impossible d'obtenir le prix pour {token_address}. Erreurs: {'; '.join(final_errors) if final_errors else 'Aucune source n\'a pu fournir de prix.'}"
+        logger.error(full_error_message)
+        return {'success': False, 'error': full_error_message, 'data': None}
         
     async def get_token_info(self, token_address: str) -> Dict[str, Any]:
         """
@@ -118,40 +161,51 @@ class MarketDataProvider:
         if cached_value:
             return {'success': True, 'error': None, 'data': cached_value}
             
-        final_error_message = f"Impossible d'obtenir les infos pour {token_address} depuis toutes les sources."
+        final_errors = []
 
         # Try Jupiter first
-        logger.debug(f"Fetching token info for {token_address} from Jupiter")
-        jupiter_result = await self._get_jupiter_token_info(token_address)
+        try:
+            logger.debug(f"Fetching token info for {token_address} from JupiterSDK")
+            jupiter_result = await self._get_jupiter_token_info(token_address)
+            if jupiter_result.get('success'):
+                self.token_info_cache[cache_key] = jupiter_result['data']
+                return jupiter_result
+            else:
+                final_errors.append(f"JupiterSDK: {jupiter_result.get('error', 'Unknown error from JupiterSDK token info')}")
+                logger.warning(f"Failed to get token info from JupiterSDK for {token_address}: {jupiter_result.get('error')}")
+        except JupiterAPIError as e:
+            final_errors.append(f"JupiterSDK Error: {str(e)}")
+            logger.warning(f"JupiterAPIError for {token_address} token info: {e}")
+        except Exception as e:
+            final_errors.append(f"JupiterSDK Unexpected Error: {str(e)}")
+            logger.error(f"Unexpected error in _get_jupiter_token_info call for {token_address}: {e}", exc_info=True)
         
-        if jupiter_result.get('success'):
-            self.token_info_cache[cache_key] = jupiter_result['data']
-            return jupiter_result
-        else:
-            logger.warning(f"Échec de la récupération des infos token depuis Jupiter pour {token_address}: {jupiter_result.get('error')}")
-            final_error_message += f" Jupiter: {jupiter_result.get('error')};"
-        
-        # Fallback to DexScreener
-        logger.debug(f"Fetching token info for {token_address} from DexScreener (fallback)")
-        await self._check_rate_limit("dexscreener")
-        if not self.session or self.session.closed: 
-            self.session = aiohttp.ClientSession()
-        
-        ds_token_url = f"{Config.DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}"
-        logger.debug(f"DexScreener token info request: GET {ds_token_url}")
-        dexscreener_data = None
-        dexscreener_error = "Unknown error"
+        # Fallback to DexScreener (this part was previously making direct calls, now should rely on a refactored _get_dexscreener_token_info or adapt)
+        # Assuming the DexScreener part of get_token_info was already refactored to use _get_dexscreener_info and raise DexScreenerAPIError
+        # For now, I will adapt the existing DexScreener logic within get_token_info to raise/catch DexScreenerAPIError directly here.
+        # This section previously contained direct aiohttp calls for DexScreener token info.
+        # It needs to be refactored to use a helper that raises DexScreenerAPIError or handle it here.
+
+        # Let's assume we make a call to a hypothetical _get_dexscreener_token_info_via_api that might raise DexScreenerAPIError
+        # If such a helper doesn't exist, the direct DexScreener call logic within this method needs its try-except blocks updated.
+        # The previous edit modified the DexScreener part within this function to raise DexScreenerAPIError.
+        # So, we will add a try-except block for that.
 
         try:
-            async with self.session.get(ds_token_url, timeout=Config.API_TIMEOUT_SECONDS) as response:
+            logger.debug(f"Fetching token info for {token_address} from DexScreener (fallback within get_token_info)")
+            await self._check_rate_limit("dexscreener") # Keep rate limit for direct dexscreener calls if any
+            if not self.session or self.session.closed: 
+                self.session = aiohttp.ClientSession()
+            
+            ds_token_url = f"{self.config.DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}"
+            logger.debug(f"DexScreener token info request (direct): GET {ds_token_url}")
+
+            async with self.session.get(ds_token_url, timeout=self.config.API_TIMEOUT_SECONDS) as response:
                 response_text = await response.text()
                 if response.status == 200:
                     try:
                         ds_api_data = json.loads(response_text)
-                        logger.debug(f"DexScreener token info response data: {ds_api_data}")
                         if ds_api_data.get("pairs") and isinstance(ds_api_data["pairs"], list) and len(ds_api_data["pairs"]) > 0:
-                            # Select the most relevant pair (e.g., highest liquidity or most traded against USD/SOL)
-                            # This logic can be sophisticated. For now, take the one with highest USD liquidity if available.
                             best_pair_for_info = sorted(
                                 [p for p in ds_api_data["pairs"] if p.get("liquidity", {}).get("usd") is not None],
                                 key=lambda x: float(x["liquidity"]["usd"]), 
@@ -163,34 +217,29 @@ class MarketDataProvider:
                                     self.token_info_cache[cache_key] = token_data
                                     return {'success': True, 'error': None, 'data': token_data, 'source': 'dexscreener'}
                                 else:
-                                    dexscreener_error = "Failed to convert DexScreener data or address missing"
+                                    raise DexScreenerAPIError("Failed to convert DexScreener data or address missing (direct call)", original_exception=ValueError("Converted data invalid"))
                             else:
-                                dexscreener_error = "No pairs with USD liquidity found on DexScreener for token info"
+                                raise DexScreenerAPIError("No pairs with USD liquidity found on DexScreener for token info (direct call)")
                         else:
-                            dexscreener_error = "No pairs array or empty pairs in DexScreener response"
+                            raise DexScreenerAPIError("No pairs array or empty pairs in DexScreener response (direct call)")
                     except json.JSONDecodeError as e:
-                        logger.error(f"DexScreener token info API JSONDecodeError for URL {ds_token_url}: {str(e)}. Response: {response_text}")
-                        dexscreener_error = f"JSONDecodeError: {str(e)}"
+                        raise DexScreenerAPIError(f"JSONDecodeError from DexScreener (direct call): {str(e)}", original_exception=e)
                 else:
-                    dexscreener_error = f"DexScreener token info API returned status {response.status}: {response_text}"
-                    logger.warning(f"{dexscreener_error} for URL {ds_token_url}")
-
-        except aiohttp.ClientError as e:
-            logger.error(f"DexScreener token info API ClientError for URL {ds_token_url}: {str(e)}", exc_info=True)
-            dexscreener_error = f"ClientError: {str(e)}"
-        except asyncio.TimeoutError:
-            logger.error(f"DexScreener token info API Timeout for URL {ds_token_url}", exc_info=True)
-            dexscreener_error = "TimeoutError"
-        except Exception as e: # Catch any other unexpected errors
-            logger.error(f"Unexpected error in get_token_info (DexScreener part) for URL {ds_token_url}: {str(e)}", exc_info=True)
-            dexscreener_error = f"UnexpectedError: {str(e)}"
-
-        logger.warning(f"Échec de la récupération des infos token depuis DexScreener pour {token_address}: {dexscreener_error}")
-        final_error_message += f" DexScreener: {dexscreener_error}"
+                    raise DexScreenerAPIError(f"DexScreener API returned status {response.status} (direct call)", status_code=response.status, original_exception=ValueError(response_text))
+        except DexScreenerAPIError as e:
+            final_errors.append(f"DexScreener Error: {str(e)}")
+            logger.warning(f"DexScreenerAPIError for {token_address} token info (direct call): {e}")
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            final_errors.append(f"DexScreener Network Error: {str(e)}")
+            logger.warning(f"DexScreener network error for {token_address} token info (direct call): {e}")
+        except Exception as e: # Catch any other unexpected errors from DexScreener direct call
+            final_errors.append(f"DexScreener Unexpected Error: {str(e)}")
+            logger.error(f"Unexpected error in DexScreener direct call for {token_address} token info: {e}", exc_info=True)
         
-        logger.error(final_error_message)
-        return {'success': False, 'error': final_error_message, 'data': None}
-        
+        full_error_message = f"Impossible d'obtenir les infos pour {token_address}. Erreurs: {'; '.join(final_errors) if final_errors else 'Aucune source n\'a pu fournir les infos.'}"
+        logger.error(full_error_message)
+        return {'success': False, 'error': full_error_message, 'data': None}
+
     async def get_liquidity_data(self, token_address: str, pool_address: Optional[str] = None) -> Dict[str, Any]:
         """
         Obtient les données de liquidité pour un token.
@@ -235,73 +284,55 @@ class MarketDataProvider:
             
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
     async def _get_jupiter_price(self, token_address: str, reference_token: str) -> Dict[str, Any]:
-        """Récupère le prix d'un token depuis Jupiter API V6 /price endpoint.
-        Returns a structured response: {'success': True/False, 'error': 'message' or None, 'data': price_data or None, 'source': 'jupiter'}
         """
-        await self._check_rate_limit("jupiter")
+        Obtient le prix d'un token via JupiterApiClient.
+        Returns a structured dict {'success': True/False, 'data': ..., 'error': ...}
+        """
+        if not self.jupiter_client:
+            return {'success': False, 'error': "JupiterApiClient not initialized", 'data': None}
+
+        logger.debug(f"Fetching price for {token_address} vs {reference_token} using JupiterApiClient")
         
-        if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession() 
-            
-        url = f"{Config.get_jupiter_price_url()}?ids={token_address}&vsToken={reference_token}"
-        headers = {}
-        if Config.JUPITER_API_KEY:
-            headers["Authorization"] = f"Bearer {Config.JUPITER_API_KEY}"
-
-        logger.debug(f"Jupiter price request: GET {url}")
         try:
-            async with self.session.get(url, headers=headers, timeout=Config.API_TIMEOUT_SECONDS) as response:
-                response_text = await response.text() # Read text for better error inspection
-                if response.status == 200:
-                    try:
-                        data = json.loads(response_text) # Parse JSON from text
-                        logger.debug(f"Jupiter price response data: {data}")
-                        
-                        if token_address not in data.get("data", {}):
-                            logger.warning(f"Token {token_address} not found in Jupiter price response: {data}")
-                            return {'success': False, 'error': f"token_not_found_in_response: {token_address}", 'data': None, 'source': 'jupiter'}
-
-                        price_info = data["data"][token_address]
-                        price_data = {
-                            "price": float(price_info["price"]) if price_info.get("price") is not None else None,
-                            "source": "jupiter",
-                            "timestamp": time.time(),
-                            "reference_token": reference_token,
-                            "vsTokenSymbol": price_info.get("vsTokenSymbol"), # Corrected based on typical Jupiter API
-                            "vsAmount": price_info.get("vsAmount"),
-                        }
-                        if price_data["price"] is None:
-                             logger.warning(f"Jupiter returned null price for {token_address} against {reference_token}")
-                             return {'success': False, 'error': f"null_price_returned_for_token: {token_address}", 'data': None, 'source': 'jupiter'}
-                        
-                        return {'success': True, 'error': None, 'data': price_data, 'source': 'jupiter'}
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Jupiter Price API JSONDecodeError for URL {url}: {str(e)}. Response text: {response_text}")
-                        return {'success': False, 'error': f"JSONDecodeError: {str(e)}", 'data': None, 'source': 'jupiter'}
-                else:
-                    error_message = f"Jupiter Price API returned status {response.status}"
-                    try:
-                        error_payload = json.loads(response_text)
-                        error_message += f": {error_payload.get('message', error_text)}"
-                    except json.JSONDecodeError:
-                        error_message += f": {response_text}"
-                    logger.error(f"{error_message} for URL {url}")
-                    return {'success': False, 'error': error_message, 'data': None, 'source': 'jupiter'}
-        except aiohttp.ClientError as e:
-            logger.error(f"Jupiter Price API ClientError for URL {url}: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"ClientError: {str(e)}", 'data': None, 'source': 'jupiter'}
-        except asyncio.TimeoutError:
-            logger.error(f"Jupiter Price API Timeout for URL {url}", exc_info=True)
-            return {'success': False, 'error': "TimeoutError", 'data': None, 'source': 'jupiter'}
-        except Exception as e: # Catch any other unexpected errors
-            logger.error(f"Unexpected error in _get_jupiter_price for URL {url}: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"UnexpectedError: {str(e)}", 'data': None, 'source': 'jupiter'}
+            # JupiterApiClient.get_prices now returns data directly or raises JupiterAPIError.
+            price_data_sdk = await self.jupiter_client.get_prices(token_ids_list=[token_address], vs_token_str=reference_token)
             
+            if price_data_sdk: # price_data_sdk is the direct response from the SDK call
+                token_price_info = price_data_sdk.get(token_address)
+                if token_price_info and isinstance(token_price_info.get("price"), (float, int)):
+                    price_info = {
+                        'price': token_price_info["price"],
+                        'token_address': token_address,
+                        'reference_token': reference_token,
+                        'source': 'jupiter_sdk',
+                        'id': token_price_info.get('id'),
+                        'mintSymbol': token_price_info.get('mintSymbol'),
+                        'vsTokenSymbol': token_price_info.get('vsTokenSymbol'),
+                        'raw_jupiter_data': token_price_info
+                    }
+                    logger.info(f"Price from Jupiter SDK for {token_address} vs {reference_token}: {price_info['price']}")
+                    return {'success': True, 'error': None, 'data': price_info}
+                else:
+                    error_msg = f"Price data not found or invalid for {token_address} in Jupiter SDK response: {price_data_sdk}"
+                    logger.warning(error_msg)
+                    return {'success': False, 'error': error_msg, 'data': None}
+            else:
+                # This case should ideally not be hit if jupiter_client.get_prices raises on no data or error.
+                error_msg = f"No data received from Jupiter SDK for {token_address} price."
+                logger.warning(error_msg)
+                return {'success': False, 'error': error_msg, 'data': None}
+        except JupiterAPIError as e:
+            error_msg = f"JupiterAPIError when fetching price for {token_address} vs {reference_token}: {e}"
+            logger.warning(error_msg)
+            return {'success': False, 'error': str(e), 'data': None, 'details': e} # Keep original exception detail
+        except Exception as e: # Catch any other unexpected error from the call
+            error_msg = f"Unexpected error fetching price from Jupiter SDK for {token_address}: {e}"
+            logger.error(error_msg, exc_info=True)
+            return {'success': False, 'error': str(e), 'data': None, 'details': e}
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
     async def _get_dexscreener_price(self, token_address: str) -> Dict[str, Any]:
-        """Récupère le prix d'un token depuis DexScreener API.
-        Returns a structured response: {'success': True/False, 'error': 'message' or None, 'data': price_data or None, 'source': 'dexscreener'}
-        """
+        """Récupère le prix d'un token depuis DexScreener API."""
         await self._check_rate_limit("dexscreener")
         
         if not self.session or self.session.closed:
@@ -368,84 +399,77 @@ class MarketDataProvider:
 
                         return {'success': True, 'error': None, 'data': price_data, 'source': 'dexscreener'}
                     except json.JSONDecodeError as e:
-                        logger.error(f"DexScreener Price API JSONDecodeError for URL {url}: {str(e)}. Response text: {response_text}")
-                        return {'success': False, 'error': f"JSONDecodeError: {str(e)}", 'data': None, 'source': 'dexscreener'}
+                        logger.error(f"DexScreener Price API JSONDecodeError for {token_address} at {url}: {str(e)}. Response: {response_text}")
+                        raise DexScreenerAPIError(f"JSONDecodeError from DexScreener: {str(e)}", original_exception=e)
                 else:
-                    error_message = f"DexScreener Price API returned status {response.status}"
-                    try:
-                        error_payload = json.loads(response_text) # DexScreener errors often have a JSON body
-                        error_message += f": {error_payload.get('error', {}).get('message', response_text)}"
-                    except json.JSONDecodeError:
-                        error_message += f": {response_text}"
-                    logger.error(f"{error_message} for URL {url}")
-                    return {'success': False, 'error': error_message, 'data': None, 'source': 'dexscreener'}
+                    logger.warning(f"DexScreener Price API for {token_address} returned status {response.status}: {response_text} for URL {url}")
+                    raise DexScreenerAPIError(f"DexScreener API returned status {response.status}", status_code=response.status, original_exception=ValueError(response_text))
 
-        except aiohttp.ClientError as e:
-            logger.error(f"DexScreener Price API ClientError for URL {url}: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"ClientError: {str(e)}", 'data': None, 'source': 'dexscreener'}
-        except asyncio.TimeoutError:
-            logger.error(f"DexScreener Price API Timeout for URL {url}", exc_info=True)
-            return {'success': False, 'error': "TimeoutError", 'data': None, 'source': 'dexscreener'}
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            logger.error(f"DexScreener Price API ClientError for {token_address} at {url}: {str(e)}", exc_info=True)
+            raise DexScreenerAPIError(f"Communication error with DexScreener: {str(e)}", original_exception=e)
+        except DexScreenerAPIError: # Re-raise if already processed
+            raise
         except Exception as e: # Catch any other unexpected errors
-            logger.error(f"Unexpected error in _get_dexscreener_price for URL {url}: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"UnexpectedError: {str(e)}", 'data': None, 'source': 'dexscreener'}
+            logger.error(f"Unexpected error in _get_dexscreener_price for {token_address} at {url}: {str(e)}", exc_info=True)
+            raise DexScreenerAPIError(f"Unexpected error processing DexScreener price data: {str(e)}", original_exception=e)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
     async def _get_jupiter_token_info(self, token_address: str) -> Dict[str, Any]:
         """
-        (Placeholder) Récupère les informations détaillées d'un token via Jupiter API.
-        Should use a dedicated Jupiter endpoint if available, or parse from /price or other sources.
-        Returns a structured response: {'success': True/False, 'error': 'message' or None, 'data': token_data or None, 'source': 'jupiter'}
+        Obtient les informations d'un token via JupiterApiClient.
+        Returns a structured dict {'success': True/False, 'data': ..., 'error': ...}
         """
-        # TODO: Implement actual Jupiter token info fetching logic if a suitable endpoint exists.
-        # For now, this is a placeholder. Jupiter's /v6/price returns some info, 
-        # but a dedicated token metadata endpoint or combining with other sources might be better.
-        # Example: Jupiter Token List API: https://station.jup.ag/docs/token-list/token-list-api
+        if not self.jupiter_client:
+            return {'success': False, 'error': "JupiterApiClient not initialized", 'data': None, 'source': 'jupiter_sdk'}
+
+        logger.debug(f"Fetching token info for {token_address} using JupiterApiClient")
         
-        # Simulate checking Jupiter's strict token list first
-        await self._check_rate_limit("jupiter_token_list") # Assuming a different rate limit category
-        if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession()
-        
-        token_list_url = "https://token.jup.ag/all"
-        logger.debug(f"Fetching Jupiter token list for {token_address}: GET {token_list_url}")
         try:
-            async with self.session.get(token_list_url, timeout=Config.API_TIMEOUT_SECONDS) as response:
-                response_text = await response.text()
-                if response.status == 200:
-                    try:
-                        tokens = json.loads(response_text)
-                        for token in tokens:
-                            if token.get("address") == token_address:
-                                # Basic conversion, can be expanded
-                                jupiter_token_data = {
-                                    "address": token.get("address"),
-                                    "name": token.get("name"),
-                                    "symbol": token.get("symbol"),
-                                    "decimals": token.get("decimals"),
-                                    "logoURI": token.get("logoURI"),
-                                    "tags": token.get("tags", []),
-                                    "source": "jupiter-token-list"
-                                }
-                                return {'success': True, 'error': None, 'data': jupiter_token_data, 'source': 'jupiter-token-list'}
-                        logger.warning(f"Token {token_address} not found in Jupiter token list.")
-                        return {'success': False, 'error': f"token_not_found_in_jupiter_list: {token_address}", 'data': None, 'source': 'jupiter-token-list'}
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Jupiter token list JSONDecodeError: {str(e)}. Response: {response_text}")
-                        return {'success': False, 'error': f"JSONDecodeError: {str(e)}", 'data': None, 'source': 'jupiter-token-list'}
+            # JupiterApiClient.get_token_info_list now returns data directly or raises JupiterAPIError.
+            token_info_list_sdk = await self.jupiter_client.get_token_info_list(mint_address_list=[token_address])
+
+            if token_info_list_sdk and isinstance(token_info_list_sdk, list) and len(token_info_list_sdk) > 0:
+                token_info_sdk = token_info_list_sdk[0]
+                if token_info_sdk.get("address") == token_address or token_info_sdk.get("mint") == token_address:
+                    formatted_token_info = {
+                        'address': token_info_sdk.get("address", token_address),
+                        'name': token_info_sdk.get("name"),
+                        'symbol': token_info_sdk.get("symbol"),
+                        'decimals': token_info_sdk.get("decimals"),
+                        'logoURI': token_info_sdk.get("logoURI"),
+                        'tags': token_info_sdk.get("tags", []),
+                        'source': 'jupiter_sdk',
+                        'raw_jupiter_data': token_info_sdk
+                    }
+                    if formatted_token_info.get('decimals') is None:
+                        error_msg = f"Crucial 'decimals' field missing in Jupiter SDK token info for {token_address}: {token_info_sdk}"
+                        logger.warning(error_msg)
+                        # Return error dict, as this method is expected to by its callers (get_token_info)
+                        return {'success': False, 'error': error_msg, 'data': None, 'source': 'jupiter_sdk'}
+
+                    logger.info(f"Token info from Jupiter SDK for {token_address}: Symbol={formatted_token_info['symbol']}, Decimals={formatted_token_info['decimals']}")
+                    return {'success': True, 'error': None, 'data': formatted_token_info}
                 else:
-                    error_msg = f"Jupiter token list API failed with status {response.status}: {response_text}"
-                    logger.error(error_msg)
-                    return {'success': False, 'error': error_msg, 'data': None, 'source': 'jupiter-token-list'}
-        except aiohttp.ClientError as e:
-            logger.error(f"Jupiter token list ClientError: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"ClientError: {str(e)}", 'data': None, 'source': 'jupiter-token-list'}
-        except asyncio.TimeoutError:
-            logger.error(f"Jupiter token list Timeout", exc_info=True)
-            return {'success': False, 'error': "TimeoutError", 'data': None, 'source': 'jupiter-token-list'}
+                    error_msg = f"Token info mismatch or not found for {token_address} in Jupiter SDK response: {token_info_list_sdk}"
+                    logger.warning(error_msg)
+                    return {'success': False, 'error': error_msg, 'data': None, 'source': 'jupiter_sdk'}
+            elif token_info_list_sdk: # Success from SDK but data is not a list or is empty (or not as expected)
+                error_msg = f"Jupiter SDK token info response for {token_address} was successful but data format unexpected: {token_info_list_sdk}"
+                logger.warning(error_msg)
+                return {'success': False, 'error': error_msg, 'data': None, 'source': 'jupiter_sdk'}
+            else: # Should be caught by JupiterAPIError if SDK call fails
+                 error_msg = f"No data received from Jupiter SDK for {token_address} token info."
+                 logger.warning(error_msg)
+                 return {'success': False, 'error': error_msg, 'data': None, 'source': 'jupiter_sdk'}
+        except JupiterAPIError as e:
+            error_msg = f"JupiterAPIError when fetching token info for {token_address}: {e}"
+            logger.warning(error_msg)
+            return {'success': False, 'error': str(e), 'data': None, 'source': 'jupiter_sdk', 'details': e}
         except Exception as e:
-            logger.error(f"Unexpected error in _get_jupiter_token_info: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"UnexpectedError: {str(e)}", 'data': None, 'source': 'jupiter-token-list'}
+            error_msg = f"Unexpected error fetching token info from Jupiter SDK for {token_address}: {e}"
+            logger.error(error_msg, exc_info=True)
+            return {'success': False, 'error': str(e), 'data': None, 'source': 'jupiter_sdk', 'details': e}
 
     async def _get_specific_pool_liquidity(self, token_address: str, pool_address: str) -> Dict[str, Any]:
         """
@@ -578,256 +602,177 @@ class MarketDataProvider:
             return {'success': True, 'error': None, 'data': cached_data}
 
         if exchange.lower() == "dexscreener":
-            await self._check_rate_limit("dexscreener")
-            if not self.session or self.session.closed:
-                self.session = aiohttp.ClientSession()
+            # 1. Find the most liquid pair for the token_address on DexScreener
+            pairs_info_url = f"{Config.DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}"
+            pairs_response = await self._make_api_request("GET", pairs_info_url, "dexscreener_pairs_for_historical")
 
-            # Determine DexScreener resolution and time parameters
-            # DexScreener resolutions: 1, 5, 15, 30, 60 (minutes), 240 (4h), 1D
-            # Mapping our timeframe to DexScreener's resolution
-            resolution_map = {
-                "1m": "1", "5m": "5", "15m": "15", "30m": "30",
-                "1h": "60", "4h": "240", "1d": "1D"
+            if not pairs_response['success'] or not pairs_response['data'].get("pairs"):
+                logger.warning(f"Could not fetch pairs for {token_address} from DexScreener for historical data: {pairs_response.get('error', 'No pairs data')}")
+                return {'success': False, 'error': f"Failed to get pairs for historical data: {pairs_response.get('error', 'No pairs data')}", 'data': None}
+
+            sorted_pairs = sorted(
+                [p for p in pairs_response['data']["pairs"] if p.get("liquidity", {}).get("usd") is not None],
+                key=lambda x: float(x["liquidity"]["usd"]),
+                reverse=True
+            )
+            if not sorted_pairs:
+                logger.warning(f"No liquid pairs found for {token_address} on DexScreener for historical data.")
+                return {'success': False, 'error': "No liquid pairs found for historical data", 'data': None}
+            
+            best_pair_address = sorted_pairs[0].get("pairAddress")
+            if not best_pair_address: # This check was correctly in my full diff, ensuring it's here
+                logger.warning(f"Best pair for {token_address} on DexScreener has no address.")
+                return {'success': False, 'error': "Best pair has no address", 'data': None}
+
+            # 2. Map timeframe to DexScreener resolution
+            ds_resolution_map = {
+                "1m": {"res": "1", "timeUnit": "minute"}, "5m": {"res": "5", "timeUnit": "minute"}, 
+                "15m": {"res": "15", "timeUnit": "minute"}, "30m": {"res": "30", "timeUnit": "minute"},
+                "1h": {"res": "60", "timeUnit": "minute"}, "4h": {"res": "240", "timeUnit": "minute"},
+                "1d": {"res": "1D", "timeUnit": "day"} 
             }
-            ds_resolution = resolution_map.get(timeframe.lower())
-            if not ds_resolution:
-                err_msg = f"Unsupported timeframe for DexScreener: {timeframe}. Supported: 1m,5m,15m,30m,1h,4h,1d"
+
+            if timeframe not in ds_resolution_map:
+                err_msg = f"Unsupported timeframe '{timeframe}' for DexScreener. Supported: {list(ds_resolution_map.keys())}"
                 logger.error(err_msg)
                 return {'success': False, 'error': err_msg, 'data': None}
 
-            # DexScreener OHLCV endpoint needs a pair address. We need to find a suitable one first.
-            # This part requires finding a representative pair for the token_address.
-            logger.debug(f"Searching for a suitable pair for {token_address} on DexScreener for historical data.")
+            selected_res_info = ds_resolution_map[timeframe]
             
-            # Try to get a good pair (e.g. highest liquidity vs USDC/SOL)
-            token_pools_url = f"{Config.DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}/pools"
-            pair_address_to_query = None
+            # Use the token specific OHLCV endpoint
+            ohlcv_url = f"{Config.DEXSCREENER_API_URL}/latest/dex/tokens/ohlcv/solana/{token_address}/{selected_res_info['res']}"
+            params_ohlcv = {"limit_int": min(limit, 1000)} # Max limit 1000 for this endpoint
             
-            try:
-                async with self.session.get(token_pools_url, timeout=Config.API_TIMEOUT_SECONDS) as pool_response:
-                    pool_response_text = await pool_response.text()
-                    if pool_response.status == 200:
+            # Make the API request using the corrected URL and parameters
+            api_response = await self._make_api_request("GET", ohlcv_url, "dexscreener_historical_ohlcv", params=params_ohlcv)
+
+            if api_response['success']:
+                raw_data = api_response['data']
+                # DexScreener OHLCV format: {"OHLCV": [{"T":timestamp_ms, "O":open, "H":high, "L":low, "C":close, "V":volume_native}, ...]}
+                if raw_data and "OHLCV" in raw_data and isinstance(raw_data["OHLCV"], list):
+                    formatted_candles = []
+                    for candle in raw_data["OHLCV"]:
                         try:
-                            pools_data = json.loads(pool_response_text)
-                            if pools_data.get("pools") and len(pools_data["pools"]) > 0:
-                                suitable_pools = [
-                                    p for p in pools_data["pools"]
-                                    if p.get("quoteToken", {}).get("symbol", "").upper() in ["USDC", "SOL", "USDT"] and p.get("liquidity", {}).get("usd")
-                                ]
-                                if suitable_pools:
-                                    best_pool = max(suitable_pools, key=lambda p: float(p["liquidity"]["usd"]))
-                                    pair_address_to_query = best_pool.get("pairAddress")
-                                else: # Fallback to just any pool with liquidity if no preferred quote token found
-                                    pools_with_liquidity = [p for p in pools_data["pools"] if p.get("liquidity", {}).get("usd")]
-                                    if pools_with_liquidity:
-                                        best_pool = max(pools_with_liquidity, key=lambda p: float(p["liquidity"]["usd"]))
-                                        pair_address_to_query = best_pool.get("pairAddress")
-                                
-                                if pair_address_to_query:
-                                     logger.info(f"Using pair {pair_address_to_query} for historical data of {token_address} on DexScreener.")
-                                else:
-                                    logger.warning(f"No suitable pair found for {token_address} on DexScreener for OHLCV.")
-                                    return {'success': False, 'error': f"no_suitable_pair_for_ohlcv: {token_address}", 'data': None}
+                            # Ensure all necessary keys are present and values are convertible
+                            ts = candle.get("T")
+                            o = candle.get("O")
+                            h = candle.get("H")
+                            l = candle.get("L")
+                            c = candle.get("C")
+                            v = candle.get("V")
+                            if all(x is not None for x in [ts, o, h, l, c, v]):
+                                formatted_candles.append({
+                                    "timestamp": ts // 1000, # Convert ms to s
+                                    "open": float(o),
+                                    "high": float(h),
+                                    "low": float(l),
+                                    "close": float(c),
+                                    "volume": float(v) # Volume in token terms
+                                })
                             else:
-                                logger.warning(f"No pools found for {token_address} to determine pair for OHLCV. Response: {pools_data}")
-                                return {'success': False, 'error': f"no_pools_to_determine_pair_for_ohlcv: {token_address}", 'data': None}
-                        except json.JSONDecodeError as e_json:
-                            logger.error(f"DexScreener pools JSONDecodeError for {token_address}: {str(e_json)}. Response: {pool_response_text}")
-                            return {'success': False, 'error': f"JSONDecodeError_pools_ohlcv: {str(e_json)}", 'data': None}
+                                logger.warning(f"Skipping candle with missing data in historical OHLCV for {token_address}: {candle}")
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Error converting candle data in historical OHLCV for {token_address}: {candle}. Error: {e}")
+                    
+                    # Sort by timestamp ascending if not already (DexScreener usually returns descending)
+                    formatted_candles.sort(key=lambda x: x["timestamp"])
+                    
+                    # Trim to limit if more data than requested 
+                    final_candles = formatted_candles[-limit:] if len(formatted_candles) > limit else formatted_candles
+
+                    if final_candles:
+                        self.historical_data_cache[cache_key] = final_candles
+                        return {'success': True, 'error': None, 'data': final_candles}
                     else:
-                        err_msg = f"DexScreener pools API for {token_address} returned {pool_response.status}: {pool_response_text}"
-                        logger.error(err_msg)
+                        # This case could happen if all candles had missing data or limit was 0
+                        err_msg = f"No valid OHLCV data processed from DexScreener for {token_address} with resolution {selected_res_info['res']}"
+                        logger.warning(f"{err_msg}. Raw response OHLCV part: {raw_data.get('OHLCV')}")
                         return {'success': False, 'error': err_msg, 'data': None}
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e_http:
-                logger.error(f"DexScreener pools API ClientError/Timeout for {token_address}: {str(e_http)}", exc_info=True)
-                return {'success': False, 'error': f"ClientError_Timeout_pools_ohlcv: {str(e_http)}", 'data': None}
-
-
-            if not pair_address_to_query:
-                 return {'success': False, 'error': f"could_not_determine_pair_for_ohlcv: {token_address}", 'data': None}
-
-            # Now fetch OHLCV data for the found pair_address_to_query
-            # Calculate `to_time` (now) and `from_time` based on limit and resolution
-            # DexScreener expects timestamps in milliseconds
-            to_time_ms = int(time.time() * 1000)
-            
-            # Estimate duration based on timeframe (e.g., "1h" -> 3600 seconds)
-            timeframe_seconds_map = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1d": 86400}
-            duration_per_candle_seconds = timeframe_seconds_map.get(timeframe.lower(), 3600) # Default to 1h
-            total_duration_seconds = limit * duration_per_candle_seconds
-            from_time_ms = int((time.time() - total_duration_seconds) * 1000)
-
-            ohlcv_url = (
-                f"{Config.DEXSCREENER_API_URL}/latest/dex/pairs/{Config.SOLANA_CHAIN_ID_DEXSCREENER}/{pair_address_to_query}"
-                f"/ohlcv?res={ds_resolution}& σειριακός αριθμός={limit}&from={from_time_ms}&to={to_time_ms}" # σειριακός αριθμός seems to be a typo in a previous version, should be count or limit
-            )
-            # Correcting the Dexscreener OHLCV endpoint, assuming it is 'count' or similar parameter, not 'σειριακός αριθμός'
-            # A common pattern is `&limit={limit_count}` or using from/to with a specific bar count in mind.
-            # Dexscreener's documentation should be checked. The given example from previous version used `σειριακός αριθμός` which is Greek for "serial number".
-            # Based on typical API designs and some Dexscreener examples, it seems they might use `limit` directly or imply it from `from/to` and `res`.
-            # For robustness, let's assume a 'limit' parameter if available, or rely on 'from'/'to' to bound the data.
-            # The DexScreener /ohlcv endpoint typically does *not* use a direct `limit` or `count` param.
-            # It expects `from` and `to` timestamps (in ms) and `res`. It returns up to 1000 bars.
-            # We'll request a window and then take the last `limit` candles from the response.
-
-            ohlcv_url = (
-                f"{Config.DEXSCREENER_API_URL}/latest/dex/pairs/{Config.SOLANA_CHAIN_ID_DEXSCREENER}/{pair_address_to_query}"
-                f"/ohlcv?res={ds_resolution}&from={from_time_ms}&to={to_time_ms}"
-            )
-            logger.debug(f"DexScreener OHLCV request: GET {ohlcv_url}")
-
-            try:
-                async with self.session.get(ohlcv_url, timeout=Config.API_TIMEOUT_SECONDS) as response:
-                    response_text = await response.text()
-                    if response.status == 200:
-                        try:
-                            ohlcv_data = json.loads(response_text)
-                            if ohlcv_data.get("ohlcv") and isinstance(ohlcv_data["ohlcv"], list):
-                                # Convert DexScreener OHLCV to standard format:
-                                # [{'timestamp': ts, 'open': o, 'high': h, 'low': l, 'close': c, 'volume': v}]
-                                # DexScreener format: {"t": timestamp_ms, "o": open_usd, "h": high_usd, "l": low_usd, "c": close_usd, "v": volume_usd}
-                                formatted_data = []
-                                for entry in ohlcv_data["ohlcv"]:
-                                    formatted_data.append({
-                                        "timestamp": entry["t"] / 1000, # Convert ms to s
-                                        "open": float(entry["o"]),
-                                        "high": float(entry["h"]),
-                                        "low": float(entry["l"]),
-                                        "close": float(entry["c"]),
-                                        "volume": float(entry["v"])
-                                    })
-                                
-                                # Ensure we return at most `limit` candles, taking the most recent ones.
-                                final_data = formatted_data[-limit:]
-                                self.historical_data_cache[cache_key] = final_data
-                                return {'success': True, 'error': None, 'data': final_data}
-                            else:
-                                logger.warning(f"DexScreener OHLCV data for {pair_address_to_query} is malformed or empty: {ohlcv_data}")
-                                return {'success': False, 'error': f"malformed_ohlcv_data: {pair_address_to_query}", 'data': None}
-                        except json.JSONDecodeError as e_json:
-                            logger.error(f"DexScreener OHLCV JSONDecodeError for {pair_address_to_query}: {str(e_json)}. Response: {response_text}")
-                            return {'success': False, 'error': f"JSONDecodeError_ohlcv: {str(e_json)}", 'data': None}
-                        except (ValueError, TypeError) as e_conv:
-                            logger.error(f"Error converting DexScreener OHLCV data for {pair_address_to_query}: {str(e_conv)}", exc_info=True)
-                            return {'success': False, 'error': f"DataConversionError_ohlcv: {str(e_conv)}", 'data': None}
-                    else:
-                        err_msg = f"DexScreener OHLCV API for {pair_address_to_query} returned {response.status}: {response_text}"
-                        logger.error(err_msg)
-                        return {'success': False, 'error': err_msg, 'data': None}
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e_http:
-                logger.error(f"DexScreener OHLCV API ClientError/Timeout for {pair_address_to_query}: {str(e_http)}", exc_info=True)
-                return {'success': False, 'error': f"ClientError_Timeout_ohlcv: {str(e_http)}", 'data': None}
-            except Exception as e_unexp:
-                logger.error(f"Unexpected error in get_historical_prices (DexScreener OHLCV part) for {pair_address_to_query}: {str(e_unexp)}", exc_info=True)
-                return {'success': False, 'error': f"UnexpectedError_ohlcv: {str(e_unexp)}", 'data': None}
+                else:
+                    err_msg = f"Format de réponse OHLCV inattendu ou vide de DexScreener pour {token_address}"
+                    logger.warning(f"{err_msg}. Raw response: {raw_data}")
+                    return {'success': False, 'error': err_msg, 'data': None}
+            else:
+                # Error already logged by _make_api_request, propagate it
+                # logger.error(f"API request failed for historical OHLCV for {token_address}: {api_response.get('error')}") # Redundant logging
+                return api_response # Propagate the structured error from _make_api_request
         else:
             # Placeholder for other exchanges
             logger.warning(f"Historical price data for exchange '{exchange}' is not implemented.")
             return {'success': False, 'error': f"exchange_not_implemented: {exchange}", 'data': None}
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
-    async def get_jupiter_swap_quote(self, input_mint: str, output_mint: str, amount_lamports: int, slippage_bps: Optional[int] = None) -> Dict[str, Any]:
+    @retry(stop=stop_after_attempt(Config.DEFAULT_API_MAX_RETRIES), wait=wait_exponential(multiplier=1, min=1, max=10), 
+           retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
+    async def get_jupiter_swap_quote(
+        self, 
+        input_mint_str: str, 
+        output_mint_str: str, 
+        amount_in_tokens: float, # Amount in human-readable token units (e.g., 0.1 SOL)
+        slippage_bps: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
-        Obtient une cotation de swap depuis Jupiter API V6 /quote endpoint.
-        Returns a structured response: {'success': True/False, 'error': 'message' or None, 'data': quote_data or None}
+        Obtient un devis de swap de Jupiter en utilisant JupiterApiClient.
+        Nécessite de récupérer les décimales du token d'entrée pour convertir le montant en lamports.
         """
-        await self._check_rate_limit("jupiter_quote") # Assuming a 'jupiter_quote' category in rate limits
-        if not self.session or self.session.closed:
-            self.session = aiohttp.ClientSession()
+        if not self.jupiter_client:
+            return {'success': False, 'error': "JupiterApiClient not initialized", 'data': None, 'source': 'jupiter_sdk'}
 
-        url = Config.get_jupiter_quote_url()
-        params = {
-            "inputMint": input_mint,
-            "outputMint": output_mint,
-            "amount": amount_lamports,
-            "slippageBps": slippage_bps if slippage_bps is not None else Config.SLIPPAGE_BPS, # Use configured default
-            "onlyDirectRoutes": Config.JUPITER_ONLY_DIRECT_ROUTES, # From Config
-            "asLegacyTransaction": False, # Prefer VersionedTransactions
-        }
-        # Filter out None params
-        params = {k: v for k, v in params.items() if v is not None}
+        logger.info(f"Fetching Jupiter swap quote for {amount_in_tokens} {input_mint_str} -> {output_mint_str}")
+
+        # 1. Get input token decimals
+        token_info_response = await self.get_token_info(input_mint_str)
+        if not token_info_response.get('success') or not token_info_response.get('data') or \
+           token_info_response['data'].get('decimals') is None:
+            error_msg = f"Failed to get token info (especially decimals) for input_mint {input_mint_str} to calculate lamports: {token_info_response.get('error')}"
+            logger.error(error_msg)
+            return {'success': False, 'error': error_msg, 'data': None, 'source': 'jupiter_sdk'}
         
-        headers = {}
-        if Config.JUPITER_API_KEY:
-            headers["Authorization"] = f"Bearer {Config.JUPITER_API_KEY}"
+        decimals = token_info_response['data']['decimals']
+        try:
+            amount_lamports = int(amount_in_tokens * (10**decimals))
+        except Exception as e:
+            error_msg = f"Error converting amount_in_tokens to lamports for {input_mint_str} (decimals: {decimals}): {e}"
+            logger.error(error_msg, exc_info=True)
+            # This is a local data processing error, not an API error from Jupiter yet.
+            # Return the standard error dict for MarketDataProvider.
+            return {'success': False, 'error': error_msg, 'data': None, 'source': 'internal_market_data'}
 
-        logger.debug(f"Jupiter quote request: GET {url} with params {params}")
-        cache_key = f"jupiter_quote_{input_mint}_{output_mint}_{amount_lamports}_{params.get('slippageBps', Config.SLIPPAGE_BPS)}"
-        cached_quote = self.jupiter_quote_cache.get(cache_key)
-        if cached_quote:
-             return {'success': True, 'error': None, 'data': cached_quote}
+        logger.debug(f"Calculated amount in lamports: {amount_lamports} for {input_mint_str}")
 
         try:
-            async with self.session.get(url, params=params, headers=headers, timeout=Config.API_TIMEOUT_SECONDS_JUPITER_QUOTE) as response: # Potentially longer timeout for quotes
-                response_text = await response.text()
-                if response.status == 200:
-                    try:
-                        quote_data = json.loads(response_text)
-                        # Jupiter V6 quote response is directly the data object, not nested under "data": {}
-                        logger.debug(f"Jupiter quote response data: {quote_data}")
-                        if not quote_data.get("outAmount"): # A key indicator of a valid quote
-                            logger.warning(f"Jupiter quote for {input_mint}->{output_mint} seems invalid (no outAmount): {quote_data}")
-                            # It might be an error object from Jupiter like {"errorCode":"QUOTE_NOT_FOUND","message":"..."}
-                            error_detail = quote_data.get("message", "Invalid quote data or no route found")
-                            if quote_data.get("errorCode"):
-                                error_detail = f"{quote_data['errorCode']}: {error_detail}"
-                            return {'success': False, 'error': error_detail, 'data': quote_data} # return full quote for inspection
+            # 2. Call JupiterApiClient.get_quote
+            # Slippage will be handled by JupiterApiClient using config default if not provided here.
+            actual_slippage_bps = slippage_bps if slippage_bps is not None else self.config.JUPITER_DEFAULT_SLIPPAGE_BPS
 
-                        self.jupiter_quote_cache.put(cache_key, quote_data) # Use put for TTLCache with specific key
-                        return {'success': True, 'error': None, 'data': quote_data}
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Jupiter Quote API JSONDecodeError for URL {url}, params {params}: {str(e)}. Response: {response_text}")
-                        return {'success': False, 'error': f"JSONDecodeError: {str(e)}", 'data': None}
-                else:
-                    error_message = f"Jupiter Quote API returned status {response.status}"
-                    try:
-                        error_payload = json.loads(response_text)
-                        error_message += f": {error_payload.get('message', error_payload.get('error', {}).get('message', response_text))}" # Try to get nested error
-                    except json.JSONDecodeError:
-                        error_message += f": {response_text}"
-                    logger.error(f"{error_message} for URL {url}, params {params}")
-                    return {'success': False, 'error': error_message, 'data': None}
-        except aiohttp.ClientError as e:
-            logger.error(f"Jupiter Quote API ClientError for URL {url}, params {params}: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"ClientError: {str(e)}", 'data': None}
-        except asyncio.TimeoutError:
-            logger.error(f"Jupiter Quote API Timeout for URL {url}, params {params}", exc_info=True)
-            return {'success': False, 'error': "TimeoutError", 'data': None}
+            # JupiterApiClient.get_quote now returns data directly or raises JupiterAPIError.
+            quote_data_sdk = await self.jupiter_client.get_quote(
+                input_mint_str=input_mint_str,
+                output_mint_str=output_mint_str,
+                amount_lamports=amount_lamports,
+                slippage_bps=actual_slippage_bps
+            )
+
+            if quote_data_sdk: # quote_data_sdk is the direct response from SDK
+                logger.info(f"Jupiter SDK quote successful for {input_mint_str} -> {output_mint_str}.")
+                return {
+                    'success': True, 
+                    'error': None, 
+                    'data': quote_data_sdk, 
+                    'source': 'jupiter_sdk'
+                }
+            else:
+                # This case should ideally not be hit if jupiter_client.get_quote raises on no data or error.
+                error_msg = f"No data received from Jupiter SDK for quote {input_mint_str} -> {output_mint_str}."
+                logger.warning(error_msg)
+                return {'success': False, 'error': error_msg, 'data': None, 'source': 'jupiter_sdk'}
+        except JupiterAPIError as e:
+            error_msg = f"JupiterAPIError when fetching quote for {input_mint_str} -> {output_mint_str}: {e}"
+            logger.warning(error_msg)
+            return {'success': False, 'error': str(e), 'data': None, 'source': 'jupiter_sdk', 'details': e}
         except Exception as e:
-            logger.error(f"Unexpected error in get_jupiter_swap_quote for URL {url}, params {params}: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"UnexpectedError: {str(e)}", 'data': None}
-
-    def _convert_jupiter_format(self, data: Dict, is_token_info: bool = False, is_pair_list: bool = False) -> Dict:
-        """Adaptation du format Jupiter au schéma standardisé.
-        This might be for a specific Jupiter endpoint. The structure of 'data' needs to be known.
-        Assuming 'data' is from an endpoint that gives token/pair like info.
-        """
-        if is_token_info: # If we specifically want token info structure
-            return {
-                'address': data.get('address') or data.get('id'), # Jupiter uses 'address' or 'id'
-                'symbol': data.get('symbol'),
-                'name': data.get('name'),
-                'decimals': data.get('decimals'),
-                'logoURI': data.get('logoURI'),
-                'tags': data.get('tags', []),
-                'source': 'jupiter',
-                'extensions': data.get('extensions')
-            }
-        # Default conversion for a pair-like structure (similar to old DexAPI)
-        return {
-            'pairAddress': data.get('id'), # Assuming 'id' is the pair identifier for Jupiter context
-            'baseToken': { # Assuming 'mint' or 'address' refers to the base token in this Jupiter context
-                'address': data.get('mint') or data.get('address'), 
-                'symbol': data.get('symbol'),
-                'name': data.get('name')
-            },
-            'quoteToken': None, # Jupiter responses might not always explicitly list quote token this way
-            'priceUsd': data.get('price'), # Assuming 'price' is in USD or the vsToken
-            'liquidity_usd': data.get('liquidity') or data.get('liquidity_usd'),
-            'volume_h24': data.get('volume24h') or data.get('volume', {}).get('h24'),
-            'source': 'jupiter',
-            'raw_data': data # Keep original for further details
-        }
+            error_msg = f"Unexpected error fetching quote from Jupiter SDK for {input_mint_str} -> {output_mint_str}: {e}"
+            logger.error(error_msg, exc_info=True)
+            return {'success': False, 'error': str(e), 'data': None, 'source': 'jupiter_sdk', 'details': e}
 
     def _convert_dexscreener_format(self, data: Dict, is_token_info: bool = False, is_pair_list: bool = False) -> Dict:
         """Normalisation des données DexScreener vers un schéma standardisé."""

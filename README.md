@@ -15,7 +15,7 @@ At its core, NumerusX aims to make advanced trading techniques accessible and ma
 *   **Security Shield**: NumerusX includes features to help identify potentially risky tokens or fraudulent schemes. Security assessments also feed into the AI Agent's decision process.
 *   **Continuous Market Understanding**: The platform constantly gathers and processes market data, ensuring that the AI Agent's decisions are based on the latest information.
 *   **Performance Tracking & Transparency**: Understand how well the AI Agent and its input strategies are performing. The system aims to provide clear logs of the AI Agent's reasoning.
-*   **User-Friendly Dashboard**: (Under development) A clear and intuitive dashboard will provide a central hub to monitor your trading bot, view your portfolio, analyze market trends, observe the AI Agent's decisions, and control its operations.
+*   **User-Friendly Dashboard**: A modern, responsive web application built with React, ShadCN/UI, and Tailwind CSS provides a central hub to monitor your trading bot, view your portfolio, analyze market trends, observe the AI Agent's decisions, and control its operations. It communicates with the backend via APIs and WebSockets for real-time data.
 
 ## How Does It Work? (An AI Agent-Centric View)
 
@@ -26,13 +26,14 @@ NumerusX operates with a central AI Agent that synthesizes information from a te
     *   `AnalyticsEngine`: Performs technical analysis and feature engineering.
     *   `PredictionEngine`: Employs AI/ML for price predictions, market regime classification, and sentiment analysis.
     *   `StrategyFramework` & `app/strategies/*`: User-defined or pre-built logic modules that generate specific signals or analytical outputs based on market data and indicators.
-3.  **The Central AI Agent (`AIAgent`)**: This is the brain. It receives and processes all the inputs from the Data Gatherer and the various Signal & Feature Generators. It also considers risk parameters from the Risk Manager and security inputs. Based on its internal logic (which could be a complex ML model, a meta-learner, or a Reinforcement Learning agent), it makes the final, holistic decision on whether to trade, what to trade, and how much.
+3.  **The Central AI Agent (`AIAgent`)**: This is the brain (initially leveraging **Google Gemini**). It receives and processes all the inputs from the Data Gatherer and the various Signal & Feature Generators. It also considers risk parameters from the Risk Manager and security inputs. Based on its internal logic (which could be a complex ML model, a meta-learner, or a Reinforcement Learning agent), it makes the final, holistic decision on whether to trade, what to trade, and how much.
 4.  **The Risk Manager (`RiskManager`)**: Provides critical risk assessment data (e.g., current exposure, available capital, volatility-based limits) as direct input to the AI Agent, ensuring its decisions adhere to safety protocols.
 5.  **The Security Guard (`Security`)**: Checks tokens for red flags. This security assessment is another input for the AI Agent.
 6.  **The Orchestrator (`DexBot`)**: This component manages the flow of information. It gathers data from all provider modules, feeds it to the AI Agent, receives the final decision from the AI Agent, and then passes this decision to the Executor.
-7.  **The Executor (`TradeExecutor` & `TradingEngine`)**: Once the AI Agent makes a decision (conveyed via `DexBot`), these components carry out the actual trades on the Solana network.
-8.  **The Record Keeper (`Database`)**: All trades, AI Agent decisions (including key inputs and reasoning), and important events are logged.
-9.  **The Control Panel (`Dashboard` - in progress)**: Your window into NumerusX, allowing you to monitor the AI Agent, its inputs, and overall performance.
+7.  **The Jupiter Maestro (`JupiterApiClient`)**: This new dedicated client handles all interactions with the Jupiter API v6 using the `jupiter-python-sdk`. It's utilized by the `MarketDataProvider` for fetching data and by the `TradingEngine` for executing swaps, limit orders, etc.
+8.  **The Executor (`TradeExecutor` & `TradingEngine`)**: Once the AI Agent makes a decision (conveyed via `DexBot`), these components carry out the actual trades on the Solana network. The `TradingEngine` specifically uses the `JupiterApiClient` for optimal swap routing and other Jupiter-specific operations.
+9.  **The Record Keeper (`Database`)**: All trades, AI Agent decisions (including key inputs and reasoning), and important events are logged.
+10. **The Control Panel (`numerusx-ui/`)**: Your window into NumerusX, built as a React application. It allows you to monitor the AI Agent, its inputs, overall performance, and manage the bot. It interacts with the FastAPI backend.
 
 ## Visualizing NumerusX: Architecture and Flow (AI Agent Centric)
 
@@ -40,13 +41,13 @@ NumerusX operates with a central AI Agent that synthesizes information from a te
 
 ```mermaid
 graph TD
-    A["User/Developer"] --> B("app/main.py");
-    B --> C{"NumerusX Core Orchestrator (app/dex_bot.py)"};
-    C --> D("app/dashboard.py - NiceGUI");
+    A["User/Developer"] --> UI_REACT("numerusx-ui/ (React Frontend)");
+    UI_REACT --- B_API("app/main.py (FastAPI Backend - API/WebSockets)");
+    B_API --> C{"NumerusX Core Orchestrator (app/dex_bot.py)"};
     
     subgraph "Input & Data Providers"
         DATASRC("app/market/market_data.py");
-        DATASRC --> EXTAPI{"External APIs: Jupiter, DexScreener, Social"};
+        DATASRC --> EXTAPI{"External APIs: DexScreener, Social"};
         TECH_ANALYSIS("app/analytics_engine.py");
         PREDICT_AI("app/prediction_engine.py");
         STRAT_FRWK("app/strategy_framework.py");
@@ -54,10 +55,11 @@ graph TD
         RISK_INFO("app/risk_manager.py");
         SEC_INFO("app/security/security.py");
         PORT_INFO("app/portfolio_manager.py");
+        JUP_CLIENT_NODE["app/utils/jupiter_api_client.py<br>Jupiter SDK Client"];
     end
 
     subgraph "Central Decision Core"
-        AI_AGENT_CORE["<<app/ai_agent.py>>\nAI Agent Décisionnel Central"];
+        AI_AGENT_CORE["<<app/ai_agent.py>>\nAI Agent Décisionnel Central<br>(using Gemini)"];
     end
 
     subgraph "Execution & Persistence"
@@ -76,8 +78,10 @@ graph TD
     C --> RISK_INFO;
     C --> SEC_INFO;
     C --> PORT_INFO;
+    C --> JUP_CLIENT_NODE;
 
     DATASRC --> AI_AGENT_CORE;
+    DATASRC --> JUP_CLIENT_NODE;
     TECH_ANALYSIS --> AI_AGENT_CORE;
     PREDICT_AI --> AI_AGENT_CORE;
     USER_STRATS --> AI_AGENT_CORE;
@@ -89,6 +93,8 @@ graph TD
     %% AI Agent returns decision to Orchestrator
     C --> EXEC_ENG;
     EXEC_ENG --> TRADE_SYS;
+    TRADE_SYS --> JUP_CLIENT_NODE;
+    JUP_CLIENT_NODE --> SOLANA;
     EXEC_ENG --> DB_STORE;
     %% For trade recording
     AI_AGENT_CORE --> DB_STORE;
@@ -137,18 +143,16 @@ sequenceDiagram
 
 ```
 NumerusX/
-├── app/
+├── app/                        # Python Backend (FastAPI, Bot Logic)
 │   ├── __init__.py
-│   ├── ai_agent.py           # NEW: Central AI Agent for decision making
-│   ├── api_routes.py         # FastAPI routes for external interaction (if any)
+│   ├── ai_agent.py           # NEW: Central AI Agent for decision making (using Gemini)
+│   ├── api_routes.py         # FastAPI routes for UI interaction (API & WebSockets)
 │   ├── analytics_engine.py     # Advanced market analysis and feature engineering (Input to AI Agent)
 │   ├── config.py             # Centralized configuration management
-│   ├── dashboard.py          # Main NiceGUI dashboard application logic
 │   ├── database.py           # SQLite database interaction and schema
 │   ├── dex_bot.py            # Core bot logic, orchestrates data to AI Agent and executes its decisions
-│   ├── gui.py                # (Potentially legacy or helper UI components for NiceGUI)
 │   ├── logger.py             # Application-wide logging setup
-│   ├── main.py               # Main entry point for the application
+│   ├── main.py               # Main entry point for the FastAPI backend application
 │   ├── monitoring.py         # System monitoring and performance tracking
 │   ├── portfolio_manager.py  # Manages portfolio state (Input to AI Agent, updated by Executor)
 │   ├── prediction_engine.py  # AI/ML models for price/trend prediction & sentiment (Input to AI Agent)
@@ -168,15 +172,24 @@ NumerusX/
 │   │   └── momentum_strategy.py
 │   │   └── mean_reversion_strategy.py
 │   │   └── trend_following_strategy.py
-│   └── trading/              # Trading execution logic
-│       └── trading_engine.py # Interface with Solana DEXs (e.g., Jupiter) for swaps
+│   ├── trading/              # Trading execution logic
+│   │   └── trading_engine.py # Interface with Solana DEXs (via **JupiterApiClient** using Jupiter SDK v6) for swaps.
+│   └── utils/                # Utility modules
+│       └── jupiter_api_client.py # NEW: Client for Jupiter API v6 using jupiter-python-sdk
+├── numerusx-ui/                # NEW: React Frontend Application
+│   ├── public/
+│   ├── src/
+│   └── package.json            # (Structure as detailed in todo/01-todo-ui.md)
 ├── Docker/
+│   ├── backend/              # Dockerfile for backend
+│   ├── frontend/             # Dockerfile for frontend (React app)
 │   └── docker-compose.yml    # Docker container orchestration
 ├── todo/                     # Task lists and planning documents
+├── .env.example              # Example environment variables
 ├── .gitignore
 ├── logo.jpg
 ├── README.md
-└── requirements.txt        # Python package dependencies
+└── requirements.txt        # Python package dependencies (for backend)
 ```
 
 ## Core Components In-Depth (Reflecting AI Agent Architecture)

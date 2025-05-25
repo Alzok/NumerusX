@@ -6,15 +6,26 @@ from solana.rpc.async_api import AsyncClient
 from solana.transaction import Transaction
 from solders.keypair import Keypair
 from solders.signature import Signature
-from solana.rpc.commitment import Confirmed
+from solana.rpc.commitment import Confirmed, ConfirmationStatus
 from solders.fee_calculator import FeeCalculator
 import base58
 import os
 import json
 import aiohttp
+from solders.transaction import VersionedTransaction
+from solders.message import Message
+from solana.exceptions import SolanaRpcException
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from solana.rpc.types import TxOpts
 
 from app.market.market_data import MarketDataProvider
-from app.config import Config
+from app.config import Config, EncryptionUtil
+from app.utils.jupiter_api_client import JupiterApiClient
+from app.utils.exceptions import (
+    JupiterAPIError, SolanaTransactionError, TransactionExpiredError, 
+    TransactionSimulationError, TransactionBroadcastError, TransactionConfirmationError,
+    NumerusXBaseError
+)
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levellevel)s - %(message)s')
@@ -28,157 +39,288 @@ class TradingEngine:
         Initialise le moteur de trading.
         
         Args:
-            wallet_path: Chemin vers le fichier de clé du portefeuille
+            wallet_path: Chemin vers le fichier de clé du portefeuille. Ce chemin est la source principale.
+                         Si ce fichier n'est pas valide ou non trouvé, des fallbacks seront tentés.
             rpc_url: URL du point de terminaison RPC Solana. Utilise Config.SOLANA_RPC_URL par défaut.
         """
-        self.rpc_url = rpc_url if rpc_url is not None else Config.SOLANA_RPC_URL
+        self.config = Config() # Initialize Config instance
+        self.rpc_url = rpc_url if rpc_url is not None else self.config.SOLANA_RPC_URL
         self.client = AsyncClient(self.rpc_url)
         self.wallet = self._initialize_wallet(wallet_path)
         self.market_data_provider = None
         self.last_transaction_signature = None
         self.transaction_history = []
+        self._api_session = None
         
-    def _initialize_wallet(self, wallet_path: str) -> Keypair:
+        # Initialize MarketDataProvider if not already done by __aenter__ strategy
+        # For now, assume it will be available when needed or passed in.
+        self.market_data_provider: Optional[MarketDataProvider] = None 
+        
+        self.jupiter_client: Optional[JupiterApiClient] = None
+        if self.wallet and self.rpc_url:
+            try:
+                # JupiterApiClient needs the private key as a base58 string.
+                # self.wallet is a Keypair object. self.wallet.secret_key() returns bytes.
+                # We need to ensure the private key used for wallet init can be re-encoded to bs58 if needed,
+                # or that JupiterApiClient can take a Keypair object directly (it expects bs58 string currently).
+                # For now, we assume SOLANA_PRIVATE_KEY_BS58 from config is the one to use for Jupiter API calls.
+                # This aligns with JupiterApiClient's current __init__ which expects a private_key_bs58 string.
+                # If self.wallet is the sole source of truth for the key, JupiterApiClient init needs adjustment.
+                # Based on current JupiterApiClient, it uses config.SOLANA_PRIVATE_KEY_BS58 if available.
+                
+                # Let's pass the loaded wallet's private key directly to JupiterApiClient.
+                # The Keypair object stores the private key as the first 32 bytes of its 64-byte internal representation (_keypair).
+                # Or, more simply, if we have the original bs58 string used to create self.wallet, we should use that.
+                # The _initialize_wallet tries to load from file or env (SOLANA_PRIVATE_KEY_BS58).
+                # So, SOLANA_PRIVATE_KEY_BS58 should be available in self.config if that was the source.
+                
+                private_key_for_jupiter = self.config.SOLANA_PRIVATE_KEY_BS58 
+                if not private_key_for_jupiter:
+                    # Fallback: If wallet was loaded from a file and not env var, we might need to derive bs58 from keypair if possible
+                    # Or ensure that the primary_wallet_path content *is* the bs58 key if used for Jupiter.
+                    # This part is tricky if the file was a JSON array.
+                    # For simplicity, we rely on SOLANA_PRIVATE_KEY_BS58 being the definitive key for Jupiter ops.
+                    logger.warning("SOLANA_PRIVATE_KEY_BS58 not found in Config for JupiterApiClient. Trading operations might fail.")
+                    # raise ConfigurationError("SOLANA_PRIVATE_KEY_BS58 must be set in Config for JupiterApiClient operations in TradingEngine")
+                
+                if private_key_for_jupiter:
+                    self.jupiter_client = JupiterApiClient(
+                        private_key_bs58=private_key_for_jupiter,
+                        rpc_url=self.rpc_url,
+                        config=self.config
+                    )
+                    logger.info("JupiterApiClient initialized successfully in TradingEngine.")
+                else:
+                    logger.error("Failed to obtain private key for JupiterApiClient in TradingEngine.")
+
+            except Exception as e:
+                logger.error(f"Failed to initialize JupiterApiClient in TradingEngine: {e}", exc_info=True)
+        else:
+            logger.warning("TradingEngine: Wallet or RPC URL not available for JupiterApiClient initialization.")
+        
+    def _load_keypair_from_file(self, file_path: str) -> Optional[Keypair]:
         """
-        Initialise le portefeuille de manière sécurisée avec validation.
-        Tente de charger depuis wallet_path, puis Config.BACKUP_WALLET_PATH, 
-        puis Config.SOLANA_PRIVATE_KEY_BS58 (variable d'environnement).
+        Tente de charger une Keypair depuis un fichier.
+        Supporte le format JSON de Solana CLI (liste de 64 int) ou un fichier texte brut contenant une clé privée base58.
+        Tente également de déchiffrer le contenu du fichier si MASTER_ENCRYPTION_KEY est configuré.
+        """
+        if not os.path.exists(file_path):
+            logger.debug(f"Wallet file not found at: {file_path}")
+            raise FileNotFoundError(f"Wallet file not found: {file_path}")
+
+        with open(file_path, 'r') as f:
+            raw_content = f.read().strip()
+        
+        content_to_parse = raw_content
+        decrypted_content = None
+
+        # Attempt decryption if MASTER_ENCRYPTION_KEY is available in Config and usable
+        if Config.MASTER_ENCRYPTION_KEY_ENV: # Check if key is set
+            logger.debug(f"MASTER_ENCRYPTION_KEY is set. Attempting to decrypt content of {file_path}.")
+            # EncryptionUtil.decrypt expects base64 encoded ciphertext.
+            # We assume the file content *is* the base64 encoded ciphertext.
+            decrypted_content = EncryptionUtil.decrypt(raw_content)
+            if decrypted_content:
+                logger.info(f"Successfully decrypted content from {file_path}.")
+                content_to_parse = decrypted_content
+            else:
+                logger.warning(f"Failed to decrypt content from {file_path}. Proceeding with raw content. This might be expected if the file is not encrypted.")
+                # Keep content_to_parse as raw_content
+        
+        # Try to parse the content (either original or decrypted)
+        parsed_keypair = self._parse_keypair_content(content_to_parse, file_path, is_decrypted=(decrypted_content is not None))
+        
+        if parsed_keypair:
+            return parsed_keypair
+        
+        # If decrypted content failed to parse, and original content was different, try parsing original content as a fallback.
+        # This handles cases where a file might not be encrypted, and decryption attempt (which would fail) shouldn't prevent plaintext loading.
+        if decrypted_content and raw_content != decrypted_content:
+            logger.debug(f"Decrypted content from {file_path} failed to parse. Attempting to parse raw file content as fallback.")
+            parsed_keypair_raw = self._parse_keypair_content(raw_content, file_path, is_decrypted=False)
+            if parsed_keypair_raw:
+                return parsed_keypair_raw
+
+        # If all attempts fail (original, or decrypted if attempted)
+        # The error from _parse_keypair_content for the last attempt (raw_content if decryption failed or wasn't attempted) will be the one raised.
+        # If decryption was attempted and succeeded but parsing decrypted content failed, that specific error is lost unless _parse_keypair_content logs it.
+        # Let's refine the error message if decryption was attempted.
+        if decrypted_content is not None and parsed_keypair is None: # Decryption happened but parsing failed
+             raise ValueError(f"File {file_path} (after attempted decryption) is not a valid Solana CLI JSON keypair or a raw Base58 private key file.")
+        # else, the error from parsing raw_content will be implicitly raised by the logic below or if parsed_keypair_raw was None
+
+        # Original logic if parsing (raw or decrypted) fails, to ensure an error is raised
+        # This part might be redundant if _parse_keypair_content raises effectively
+        if parsed_keypair is None: # This condition means all attempts including fallback to raw (if applicable) failed.
+            raise ValueError(f"File {file_path} is not a valid Solana CLI JSON keypair or a raw Base58 private key file, even after attempting decryption (if configured).")
+        
+        return parsed_keypair # Should technically be unreachable if an error is always raised above on failure
+
+    def _parse_keypair_content(self, content: str, file_path_for_log: str, is_decrypted: bool) -> Optional[Keypair]:
+        """
+        Helper function to parse keypair from string content (JSON or Base58).
+        Logs context about whether the content was decrypted.
+        """
+        keypair = None
+        log_prefix = f"(Decrypted content of {file_path_for_log})" if is_decrypted else f"(Raw content of {file_path_for_log})"
+
+        # Attempt 1: Try parsing as Solana CLI JSON
+        try:
+            key_data_json = json.loads(content)
+            if isinstance(key_data_json, list) and len(key_data_json) == 64 and all(isinstance(x, int) for x in key_data_json):
+                private_key_bytes = bytes(key_data_json)
+                keypair = Keypair.from_bytes(private_key_bytes)
+                logger.debug(f"Successfully loaded Keypair from JSON. {log_prefix}")
+                return keypair
+            else:
+                logger.debug(f"{log_prefix} is JSON but not in expected Solana CLI format.")
+        except json.JSONDecodeError:
+            logger.debug(f"{log_prefix} is not valid JSON. Attempting to load as raw Base58 private key.")
+        except ValueError as ve:
+            logger.debug(f"Error creating Keypair from JSON bytes. {log_prefix}: {ve}. Expected 64 bytes [secret+public].")
+
+        # Attempt 2: Try parsing as raw Base58 private key string
+        try:
+            decoded_bs58_key = base58.b58decode(content)
+            if len(decoded_bs58_key) == 32:
+                keypair = Keypair.from_secret_key(decoded_bs58_key)
+                logger.debug(f"Successfully loaded Keypair from Base58 private key. {log_prefix}")
+                return keypair
+            else:
+                logger.debug(f"{log_prefix} decoded Base58 content has length {len(decoded_bs58_key)}, expected 32 bytes.")
+        except Exception as e:
+            logger.debug(f"Failed to decode Base58 content or create Keypair. {log_prefix}: {e}")
+            
+        if keypair is None:
+            # Don't raise here, let the caller decide. This function just attempts parsing.
+            logger.debug(f"Failed to parse content as Keypair. {log_prefix}")
+        return keypair
+
+    def _load_keypair_from_env_var(self, env_var_name: str) -> Optional[Keypair]:
+        """
+        Tente de charger une Keypair depuis une variable d'environnement contenant une clé privée base58.
+        """
+        private_key_bs58 = getattr(Config, env_var_name, None) # Use getattr for safety
+        if not private_key_bs58:
+            logger.debug(f"Environment variable {env_var_name} not set or empty.")
+            return None
+        
+        try:
+            private_key_bytes = base58.b58decode(private_key_bs58)
+            if len(private_key_bytes) != 32:
+                raise ValueError(f"Invalid private key length from {env_var_name}: {len(private_key_bytes)}, expected 32 bytes.")
+            keypair = Keypair.from_secret_key(private_key_bytes)
+            logger.debug(f"Successfully loaded Keypair from environment variable {env_var_name}.")
+            return keypair
+        except Exception as e:
+            logger.error(f"Failed to initialize wallet from {env_var_name}: {e}")
+            raise ValueError(f"Invalid private key in environment variable {env_var_name}: {e}")
+
+    def _initialize_wallet(self, primary_wallet_path: str) -> Keypair:
+        """
+        Initialise le portefeuille de manière sécurisée avec validation et fallbacks.
+        Ordre de tentative:
+        1. Chemin principal fourni (`primary_wallet_path`).
+        2. Chemin de secours (`Config.BACKUP_WALLET_PATH`).
+        3. Variable d'environnement (`Config.SOLANA_PRIVATE_KEY_BS58`).
         
         Args:
-            wallet_path: Chemin principal vers le fichier de clé du portefeuille.
+            primary_wallet_path: Chemin principal vers le fichier de clé du portefeuille.
             
         Returns:
             Instance Keypair pour le portefeuille.
             
         Raises:
-            ValueError: Si aucune méthode de chargement de portefeuille ne réussit.
+            ValueError: Si aucune méthode de chargement de portefeuille ne réussit ou si un chemin/clé est invalide.
         """
-        primary_error = None
-        # Attempt 1: Load from primary wallet_path
-        try:
-            logger.info(f"Attempting to load wallet from primary path: {wallet_path}")
-            if not os.path.exists(wallet_path):
-                raise FileNotFoundError(f"Primary wallet file not found: {wallet_path}")
-            
-            with open(wallet_path, 'r') as f:
-                try: # JSON format (Solana CLI)
-                    key_data = json.load(f)
-                    if isinstance(key_data, list):
-                        private_key_bytes = bytes(key_data)
-                    else:
-                        raise ValueError("Unrecognized key format in JSON file")
-                except json.JSONDecodeError: # Try raw base58
-                    f.seek(0) # Reset file pointer after failed json.load
-                    content = f.read().strip()
-                    try:
-                        private_key_bytes = base58.b58decode(content)
-                    except Exception as b58_e:
-                        raise ValueError(f"Not a valid JSON or Base58 key file: {b58_e}")
-            
-            if len(private_key_bytes) != 64: # Solana private keys are typically 32 bytes, Keypair expects 64 (seed)
-                                          # Keypair.from_secret_key expects 32 bytes or 64 for seed.
-                                          # Solana CLI JSON is usually a list of 64 numbers (uint8 array for seed).
-                                          # Raw base58 key is usually the 32-byte secret key.
-                                          # Keypair.from_bytes() expects 64 bytes (private key + public key, or seed)
-                                          # Let's clarify based on typical usage.
-                                          # If it's a 32-byte secret, use Keypair.from_secret_key.
-                                          # If it's from Solana CLI JSON (often 64 bytes), Keypair.from_seed_phrase_and_passphrase or from_seed may apply if it's a seed.
-                                          # For now, assuming the loaded `private_key_bytes` are the 64-byte representation expected by Keypair.from_bytes or a 32-byte secret key.
-                # If we have 32 bytes, it's likely the secret key part. Keypair.from_secret_key() handles this.
-                # If we have 64 bytes from JSON, it's usually the full keypair bytes [secret_key (32) + public_key (32)] or a seed (64).
-                # Keypair.from_bytes expects 64 bytes which are [secret_key (32 bytes) + public_key (32 bytes)].
-                # Or it could be a 64-byte seed. For Solana CLI json, it's usually the 64-byte array representing the keypair.
+        error_messages = []
 
-                # Let's assume if it's 64 bytes it's the full keypair data as bytes
-                # If it's 32 bytes it's the secret_key component
-                if len(private_key_bytes) == 32: # This would be a raw secret key
-                    keypair = Keypair.from_secret_key(private_key_bytes)
-                elif len(private_key_bytes) == 64: # This could be seed or [secret+public]
-                    # Solana CLI JSON format is typically the 64-byte array [secret_key + public_key]
-                    # Keypair.from_bytes can take this.
-                    keypair = Keypair.from_bytes(private_key_bytes) # This is likely if loading from JSON array of 64 numbers
-                else:
-                    raise ValueError(f"Invalid private key length: {len(private_key_bytes)}, expected 32 or 64 bytes")
+        # Attempt 1: Load from primary_wallet_path
+        if primary_wallet_path:
+            logger.info(f"Attempting to load wallet from primary path: {primary_wallet_path}")
+            try:
+                keypair = self._load_keypair_from_file(primary_wallet_path)
+                if keypair:
+                    logger.info(f"Wallet initialized successfully from primary path: {primary_wallet_path}. Address: {keypair.pubkey()}")
+                    return keypair
+            except Exception as e:
+                msg = f"Failed to load wallet from primary path '{primary_wallet_path}': {e}"
+                logger.warning(msg)
+                error_messages.append(msg)
+        else:
+            logger.warning("Primary wallet path was not provided.")
+            error_messages.append("Primary wallet path not provided.")
 
-            logger.info(f"Wallet initialized successfully from {wallet_path}. Address: {keypair.pubkey()}")
-            return keypair
-        except Exception as e:
-            logger.error(f"Failed to initialize wallet from primary path {wallet_path}: {e}")
-            primary_error = e
 
-        # Attempt 2: Load from backup wallet_path if primary failed
+        # Attempt 2: Load from backup wallet_path
         if Config.BACKUP_WALLET_PATH:
+            logger.info(f"Attempting to load wallet from backup path: {Config.BACKUP_WALLET_PATH}")
             try:
-                logger.warning(f"Attempting to load wallet from backup path: {Config.BACKUP_WALLET_PATH}")
-                if not os.path.exists(Config.BACKUP_WALLET_PATH):
-                    raise FileNotFoundError(f"Backup wallet file not found: {Config.BACKUP_WALLET_PATH}")
-                
-                with open(Config.BACKUP_WALLET_PATH, 'r') as f:
-                    try: # JSON format
-                        key_data = json.load(f)
-                        if isinstance(key_data, list):
-                            private_key_bytes = bytes(key_data)
-                        else: raise ValueError("Unrecognized key format in backup JSON")
-                    except json.JSONDecodeError: # Raw base58
-                        f.seek(0)
-                        content = f.read().strip()
-                        try: private_key_bytes = base58.b58decode(content)
-                        except Exception as b58_e: raise ValueError(f"Backup not valid JSON or B58: {b58_e}")
-
-                if len(private_key_bytes) == 32:
-                    keypair = Keypair.from_secret_key(private_key_bytes)
-                elif len(private_key_bytes) == 64:
-                    keypair = Keypair.from_bytes(private_key_bytes)
-                else:
-                    raise ValueError(f"Invalid backup private key length: {len(private_key_bytes)}")
-                
-                logger.info(f"Wallet initialized successfully from backup {Config.BACKUP_WALLET_PATH}. Address: {keypair.pubkey()}")
-                return keypair
-            except Exception as backup_e:
-                logger.error(f"Failed to initialize wallet from backup path {Config.BACKUP_WALLET_PATH}: {backup_e}")
+                keypair = self._load_keypair_from_file(Config.BACKUP_WALLET_PATH)
+                if keypair:
+                    logger.info(f"Wallet initialized successfully from backup path: {Config.BACKUP_WALLET_PATH}. Address: {keypair.pubkey()}")
+                    return keypair
+            except Exception as e:
+                msg = f"Failed to load wallet from backup path '{Config.BACKUP_WALLET_PATH}': {e}"
+                logger.warning(msg)
+                error_messages.append(msg)
         else:
-            logger.info("No backup wallet path configured.")
+            logger.info("No backup wallet path configured (Config.BACKUP_WALLET_PATH is empty).")
+            # No error_message append here as it's optional
 
-        # Attempt 3: Load from environment variable (SOLANA_PRIVATE_KEY_BS58)
-        if Config.SOLANA_PRIVATE_KEY_BS58:
-            try:
-                logger.warning("Attempting to load wallet from SOLANA_PRIVATE_KEY_BS58 environment variable.")
-                private_key_bs58 = Config.SOLANA_PRIVATE_KEY_BS58
-                private_key_bytes = base58.b58decode(private_key_bs58)
-                
-                # Solana private keys are 32 bytes. Keypair.from_secret_key takes these 32 bytes.
-                if len(private_key_bytes) != 32: 
-                    raise ValueError(f"Invalid private key length from env var: {len(private_key_bytes)}, expected 32 bytes for a Base58 secret key string.")
-                
-                keypair = Keypair.from_secret_key(private_key_bytes)
-                logger.info(f"Wallet initialized successfully from SOLANA_PRIVATE_KEY_BS58. Address: {keypair.pubkey()}")
-                return keypair
-            except Exception as env_e:
-                logger.error(f"Failed to initialize wallet from SOLANA_PRIVATE_KEY_BS58: {env_e}")
+        # Attempt 3: Load from environment variable
+        # SOLANA_PRIVATE_KEY_BS58 is now expected to be in Config class
+        if Config.SOLANA_PRIVATE_KEY_BS58: # Check if the attribute itself exists and is not None/empty
+             logger.info(f"Attempting to load wallet from SOLANA_PRIVATE_KEY_BS58 environment variable.")
+             try:
+                 keypair = self._load_keypair_from_env_var("SOLANA_PRIVATE_KEY_BS58")
+                 if keypair:
+                     logger.info(f"Wallet initialized successfully from SOLANA_PRIVATE_KEY_BS58. Address: {keypair.pubkey()}")
+                     return keypair
+             except Exception as e: # ValueError is raised by _load_keypair_from_env_var on failure
+                msg = f"Failed to load wallet from SOLANA_PRIVATE_KEY_BS58 environment variable: {e}"
+                logger.warning(msg)
+                error_messages.append(msg)
         else:
-            logger.info("No SOLANA_PRIVATE_KEY_BS58 environment variable configured.")
+            logger.info("No SOLANA_PRIVATE_KEY_BS58 environment variable configured or Config.SOLANA_PRIVATE_KEY_BS58 is empty.")
+            # No error_message append here as it's optional
 
-        # If all attempts fail, raise a comprehensive error
-        final_error_message = "All wallet initialization methods failed."
-        if primary_error:
-            final_error_message += f" Primary error: {str(primary_error)}."
-        # Could add details about backup/env errors too if needed, but might be too verbose.
-        logger.critical(final_error_message)
-        raise ValueError(final_error_message)
+        # If all attempts fail
+        final_error_summary = "All wallet initialization methods failed. See warnings above for details on each attempt."
+        logger.critical(final_error_summary)
+        # Optionally, join error_messages for a more detailed exception:
+        # detailed_errors = "\n".join(error_messages)
+        # raise ValueError(f"{final_error_summary}\n{detailed_errors}")
+        raise ValueError(final_error_summary)
             
     async def __aenter__(self):
         """Initialise les ressources asynchrones."""
-        self.market_data_provider = MarketDataProvider()
-        await self.market_data_provider.__aenter__()
+        self._api_session = aiohttp.ClientSession() # For any direct HTTP calls if still needed (e.g. fallback Dexscreener)
+        # Initialize MarketDataProvider here if it uses the session
+        if not self.market_data_provider:
+            self.market_data_provider = MarketDataProvider() # It will init its own session or we can pass one
+            # If MarketDataProvider needs the session from TradingEngine:
+            # self.market_data_provider.session = self._api_session 
+            # Ensure MarketDataProvider also handles its session in its __aenter__/__aexit__ if shared.
+            # For now, MarketDataProvider manages its own session internally.
+        
+        # Ensure JupiterApiClient's async_client is ready (it is initialized in __init__)
+        # If JupiterApiClient also needed an __aenter__ for its client, call it here.
+        # await self.jupiter_client.__aenter__() # If it had such a method
+
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Libère les ressources asynchrones."""
-        if self.market_data_provider:
+        if self._api_session and not self._api_session.closed:
+            await self._api_session.close()
+        if self.market_data_provider and hasattr(self.market_data_provider, '__aexit__'):
             await self.market_data_provider.__aexit__(exc_type, exc_val, exc_tb)
-        await self.client.close()
-            
-    async def get_fee_for_message(self, transaction: Transaction) -> int:
+        if self.jupiter_client and hasattr(self.jupiter_client, 'close_async_client'):
+            await self.jupiter_client.close_async_client()
+        await self.client.close() # Close the main Solana client
+
+    async def get_fee_for_message(self, transaction: Transaction) -> Dict[str, Any]:
         """
         Estime les frais pour une transaction avant exécution.
         
@@ -188,482 +330,196 @@ class TradingEngine:
         Returns:
             Frais estimés en lamports
         """
+        # This method interacts with Solana RPC, not an external HTTP API in the same sense.
+        # Error handling for RPC calls should be specific to solana-py library exceptions.
+        # The return type should also be standardized to {'success': ..., 'error': ..., 'data': ...}
         try:
-            # Convertir la transaction en message
-            recent_blockhash = await self.client.get_latest_blockhash()
-            transaction.recent_blockhash = recent_blockhash.value.blockhash
+            recent_blockhash_response = await self.client.get_latest_blockhash(commitment=Confirmed)
+            if not recent_blockhash_response.value or not recent_blockhash_response.value.blockhash:
+                logger.error("Failed to get recent blockhash for fee estimation.")
+                return {'success': False, 'error': "Failed to get recent blockhash", 'data': None}
+            transaction.recent_blockhash = recent_blockhash_response.value.blockhash
             
-            # Obtenir l'estimation des frais
-            fee_response = await self.client.get_fee_for_message(
-                transaction.serialize_message()
-            )
+            message_bytes = transaction.serialize_message()
+            fee_response = await self.client.get_fee_for_message(message_bytes, commitment=Confirmed)
             
-            if fee_response.value is None:
-                # Utiliser une estimation de repli
-                fee_calculator = FeeCalculator(Config.DEFAULT_FEE_PER_SIGNATURE_LAMPORTS)
-                signatures_count = len(transaction.signatures)
-                estimated_fee = fee_calculator.calculate_fee(transaction.serialize_message()) 
-                logger.warning(f"Utilisation de l'estimation de repli des frais: {estimated_fee} lamports")
-                return estimated_fee
+            if fee_response.value is None: # Check if fee value is None (can happen)
+                logger.error(f"get_fee_for_message returned None for tx. Blockhash: {transaction.recent_blockhash}")
+                return {'success': False, 'error': "Failed to estimate fee (RPC returned null)", 'data': None}
                 
-            return fee_response.value
-            
+            logger.info(f"Estimated fee: {fee_response.value} lamports")
+            return {'success': True, 'error': None, 'data': {'fee_lamports': fee_response.value}}
         except Exception as e:
-            logger.error(f"Erreur lors de l'estimation des frais: {e}")
-            # Valeur par défaut sécuritaire
-            return Config.DEFAULT_FEE_PER_SIGNATURE_LAMPORTS * len(transaction.signatures)
+            # Catching Solana-specific RPC exceptions would be more precise, e.g., RPCException
+            # from solana.rpc.core import RPCException (or similar based on library version)
+            logger.error(f"Error estimating transaction fee: {str(e)}", exc_info=True)
+            return {'success': False, 'error': f"Error estimating fee: {str(e)}", 'data': None}
             
-    async def execute_swap(self, input_token_mint: str, output_token_mint: str, 
-                           amount_in_usd: Optional[float] = None, 
-                           amount_in_tokens: Optional[float] = None, 
-                           slippage_bps: Optional[int] = None) -> Dict[str, Any]:
+    async def execute_swap(
+        self, 
+        input_token_mint: str, 
+        output_token_mint: str, 
+        amount_in_usd: Optional[float] = None, 
+        amount_in_tokens_float: Optional[float] = None, 
+        slippage_bps: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
-        Exécute un swap entre deux tokens.
-        Prioritise amount_in_tokens si fourni, sinon calcule à partir de amount_in_usd.
-        
-        Args:
-            input_token_mint: Adresse du token d'entrée (e.g., USDC mint address).
-            output_token_mint: Adresse du token de sortie.
-            amount_in_usd: Montant à échanger, exprimé en USD. Sera converti en montant de token d'entrée.
-            amount_in_tokens: Montant du token d'entrée à échanger. Prioritaire sur amount_in_usd.
-            slippage_bps: Tolérance de slippage en points de base (BPS). Utilise Config.SLIPPAGE_BPS par défaut.
-            
-        Returns:
-            Dictionnaire structuré: {'success': True/False, 'data': ..., 'error': ...}
+        Exécute un swap en utilisant JupiterApiClient via MarketDataProvider et JupiterApiClient directement.
+        Gère la conversion USD -> tokens si nécessaire, obtient la quote, récupère les données de transaction,
+        signe et envoie la transaction. Inclut la logique de retry pour TransactionExpiredError.
         """
-        current_slippage_bps = slippage_bps if slippage_bps is not None else Config.SLIPPAGE_BPS
+        start_time = time.time()
+        self.last_transaction_signature = None # Reset before new attempt
 
-        if amount_in_tokens is None and amount_in_usd is None:
-            return {'success': False, 'error': "amount_in_tokens ou amount_in_usd doit être fourni.", 'data': None}
-        
-        if amount_in_tokens is not None and amount_in_tokens <= 0:
-            return {'success': False, 'error': "amount_in_tokens doit être positif.", 'data': None}
-        if amount_in_usd is not None and amount_in_usd <= 0:
-             return {'success': False, 'error': "amount_in_usd doit être positif.", 'data': None}
-
-        final_amount_in_tokens: float
-
-        if amount_in_tokens is not None:
-            final_amount_in_tokens = amount_in_tokens
-            logger.info(f"Initiating swap: {final_amount_in_tokens} {input_token_mint} -> {output_token_mint} with slippage: {current_slippage_bps} BPS (using provided token amount)")
-        elif amount_in_usd is not None:
-            if not self.market_data_provider:
-                return {'success': False, 'error': "MarketDataProvider non initialisé pour convertir USD en tokens.", 'data': None}
-            
-            # Obtenir le prix du token d'entrée pour calculer le montant en tokens
-            price_response = await self.market_data_provider.get_token_price(input_token_mint)
-            if not price_response['success'] or price_response['data'] is None or price_response['data'] <= 0:
-                error_msg = f"Impossible d'obtenir le prix pour {input_token_mint} afin de convertir USD. Erreur: {price_response.get('error', 'Prix non disponible ou invalide')}"
-                logger.error(error_msg)
-                return {'success': False, 'error': error_msg, 'data': None}
-            
-            input_token_price_usd = price_response['data']
-            final_amount_in_tokens = amount_in_usd / input_token_price_usd
-            logger.info(f"Initiating swap: {amount_in_usd:.2f} USD ({final_amount_in_tokens:.6f} {input_token_mint} @ ${input_token_price_usd:.6f}/token) -> {output_token_mint} with slippage: {current_slippage_bps} BPS")
-        else:
-            # This case should be caught by the initial check, but as a safeguard:
-            return {'success': False, 'error': "Logique de montant invalide.", 'data': None}
-
-        try:
-            # _get_swap_routes prend le montant en tokens du token d'entrée
-            routes_response = await self._get_swap_routes(input_token_mint, output_token_mint, final_amount_in_tokens, current_slippage_bps)
-            
-            if not routes_response['success']:
-                error_msg = f"Failed to get swap routes: {routes_response.get('error', 'Unknown error from _get_swap_routes')}"
-                logger.error(error_msg)
-                return {'success': False, 'error': error_msg, 'data': routes_response.get('data')} # Pass along partial data like the quote response itself
-
-            routes = routes_response['data'] # This is now a list containing one route object from Jupiter /quote
-            if not routes or not isinstance(routes, list) or len(routes) == 0:
-                error_msg = f"No routes found in successful response from _get_swap_routes. Data: {routes}"
-                logger.error(error_msg)
-                return {'success': False, 'error': error_msg, 'data': None}
-
-            # _select_best_quote expects a list of routes. Jupiter /quote gives one best route.
-            # Our _get_swap_routes wraps it in a list.
-            best_route = await self._select_best_quote(routes, final_amount_in_tokens) # _select_best_quote raises ValueError if no viable route
-            
-            # Construire la transaction de swap
-            # This will be updated to return a structured response in the next step
-            build_tx_response = await self._build_swap_transaction(best_route)
-            # TODO: Adapt to structured response from _build_swap_transaction once implemented
-            # For now, assume it returns transaction_bytes directly or raises an error.
-            # transaction_bytes = build_tx_response['data']["serialized_transaction"]
-            # transaction = Transaction.deserialize(transaction_bytes)
-            
-            # Placeholder for _build_swap_transaction structure until it's refactored
-            if not build_tx_response or not build_tx_response.get("swapTransaction"):
-                 error_msg = f"Failed to build swap transaction or invalid response: {build_tx_response}"
-                 logger.error(error_msg)
-                 return {'success': False, 'error': error_msg, 'data': build_tx_response}
-            
-            transaction_bytes_b64 = build_tx_response["swapTransaction"]
-            transaction_bytes = base58.b58decode(transaction_bytes_b64) # Jupiter returns base64 encoded string
-            transaction = Transaction.deserialize(transaction_bytes)
-            
-            estimated_fee = await self.get_fee_for_message(transaction)
-            logger.info(f"Estimated fee for this transaction: {estimated_fee / 1_000_000_000:.6f} SOL")
-            
-            # Exécuter la transaction
-            # This will be updated to return a structured response in the next step
-            exec_tx_response = await self._execute_transaction(transaction_bytes_b64, build_tx_response.get("last_valid_block_height", 0))
-            # TODO: Adapt to structured response from _execute_transaction once implemented
-            
-            # Placeholder for _execute_transaction structure until it's refactored
-            if not exec_tx_response or not exec_tx_response.get("signature"): # Assuming simple dict with signature
-                error_msg = f"Swap execution failed or invalid response: {exec_tx_response}"
-                logger.error(error_msg)
-                # Propagate the error if exec_tx_response itself is a structured error from a future refactor
-                if isinstance(exec_tx_response, dict) and 'success' in exec_tx_response and not exec_tx_response['success']:
-                    return exec_tx_response
-                return {'success': False, 'error': error_msg, 'data': exec_tx_response}
-            
-            # Assuming exec_tx_response on success is like: {'signature': str, 'confirmation': ...}
-            # For now, let's make it a structured success
-            final_success_data = {
-                'signature': exec_tx_response.get("signature"),
-                'confirmation_details': exec_tx_response.get("confirmation_status"),
-                'input_token': input_token_mint,
-                'output_token': output_token_mint,
-                'amount_in': final_amount_in_tokens,
-                'route_info': best_route,
-                'expected_amount_out': best_route.get("outAmount"),
-                'fee_lamports': estimated_fee,
-                'slippage_bps': current_slippage_bps
-            }
-            self._record_transaction(exec_tx_response, final_success_data) # _record_transaction needs to be adapted
-            
-            return {'success': True, 'data': final_success_data, 'error': None}
-            
-        except ValueError as ve: # Catch specific errors like from _select_best_quote
-            logger.error(f"Swap execution failed due to ValueError: {str(ve)}", exc_info=True)
-            return {'success': False, 'error': f"ValueError: {str(ve)}", 'data': None}
-        except Exception as e:
-            logger.error(f"Generic swap execution failed: {str(e)}", exc_info=True)
-            try:
-                logger.warning("Attempting fallback swap mechanism...")
-                # Ensure _execute_fallback_swap also returns a structured response
-                fallback_result = await self._execute_fallback_swap(input_token_mint, output_token_mint, final_amount_in_tokens, current_slippage_bps)
-                if fallback_result['success']:
-                    logger.info("Fallback swap successful.")
-                else:
-                    logger.error(f"Fallback swap also failed: {fallback_result.get('error')}")
-                return fallback_result
-            except Exception as fallback_e:
-                logger.critical(f"Fallback swap mechanism itself failed: {fallback_e}", exc_info=True)
-                return {'success': False, 'error': f"Primary swap failed ({type(e).__name__}): {str(e)}. Fallback failed ({type(fallback_e).__name__}): {str(fallback_e)}", 'data': None}
-                
-    async def _select_best_quote(self, routes: List[Dict[str, Any]], amount_in: float) -> Dict[str, Any]:
-        """
-        Sélectionne la meilleure offre en tenant compte du prix et des frais.
-        
-        Args:
-            routes: Liste des routes disponibles
-            amount_in: Montant d'entrée
-            
-        Returns:
-            Meilleure route pour l'échange
-        """
-        if not routes:
-            raise ValueError("Aucune route disponible pour cet échange")
-            
-        best_route = None
-        best_effective_price = 0
-        
-        for route in routes:
-            # Calculer le prix effectif (montant sortant moins frais estimés)
-            out_amount = float(route["outAmount"])
-            
-            # Estimer les frais pour cette route
-            try:
-                tx_data = await self._build_swap_transaction(route)
-                tx = Transaction.deserialize(tx_data["transaction"])
-                estimated_fee = await self.get_fee_for_message(tx)
-                
-                # Convertir les frais dans la même unité que le montant sortant
-                # (ceci est une simplification, nécessiterait normalement une conversion de devise)
-                fee_adjustment = estimated_fee / 1_000_000  # Ajustement approximatif
-                
-                effective_price = out_amount - fee_adjustment
-                
-                if best_route is None or effective_price > best_effective_price:
-                    best_route = route
-                    best_effective_price = effective_price
-                    
-            except Exception as e:
-                logger.warning(f"Erreur lors de l'évaluation de la route {route.get('market', 'inconnue')}: {e}")
-                # Continuer avec la route suivante
-                continue
-                
-        if best_route is None:
-            raise ValueError("Impossible de trouver une route viable pour cet échange")
-            
-        return best_route
-        
-    async def _get_swap_routes(self, input_token_mint: str, output_token_mint: str, amount_in_tokens: float, slippage_bps: int) -> Dict[str, Any]:
-        """
-        Récupère les routes de swap de Jupiter.
-        Args:
-            input_token_mint: Adresse du token d'entrée.
-            output_token_mint: Adresse du token de sortie.
-            amount_in_tokens: Montant du token d'entrée à échanger (pas en USD).
-            slippage_bps: Slippage en BPS.
-        Returns:
-            Réponse structurée de l'API Jupiter /quote.
-        """
         if not self.market_data_provider:
-             # Should not happen if TradingEngine is used via async with
-            logger.error("MarketDataProvider not available in _get_swap_routes")
-            return {'success': False, 'error': 'MarketDataProvider not available', 'data': None}
+            logger.error("MarketDataProvider not initialized in TradingEngine for execute_swap.")
+            return {"success": False, "error": "MarketDataProvider not initialized", "signature": None, "details": None}
+        if not self.jupiter_client:
+            logger.error("JupiterApiClient not initialized in TradingEngine for execute_swap.")
+            return {"success": False, "error": "JupiterApiClient not initialized", "signature": None, "details": None}
 
-        # Obtenir les décimales du token d'entrée pour calculer amount_lamports
-        token_info_response = await self.market_data_provider.get_token_info(input_token_mint)
-        if not token_info_response['success'] or not token_info_response['data'] or 'decimals' not in token_info_response['data']:
-            error_msg = f"Impossible d'obtenir les décimales pour {input_token_mint}. Erreur: {token_info_response.get('error', 'Informations sur le token non disponibles')}"
+        actual_slippage_bps = slippage_bps if slippage_bps is not None else self.config.JUPITER_DEFAULT_SLIPPAGE_BPS
+
+        # Validate and determine amount_in_tokens_float
+        if amount_in_tokens_float is None and amount_in_usd is not None:
+            logger.info(f"Amount in USD provided: {amount_in_usd}. Converting to token amount for {input_token_mint}.")
+            price_response = await self.market_data_provider.get_token_price(input_token_mint)
+            if not price_response.get("success") or not price_response.get("data") or not price_response["data"].get("price"):
+                error_msg = f"Failed to get price for input token {input_token_mint} to convert USD amount: {price_response.get('error')}"
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg, "signature": None, "details": None}
+            token_price_usd = price_response["data"]["price"]
+            if token_price_usd <= 0:
+                error_msg = f"Invalid price ({token_price_usd}) for input token {input_token_mint}. Cannot convert USD amount."
+                logger.error(error_msg)
+                return {"success": False, "error": error_msg, "signature": None, "details": None}
+            amount_in_tokens_float = amount_in_usd / token_price_usd
+            logger.info(f"Converted {amount_in_usd} USD to {amount_in_tokens_float} of {input_token_mint} at price {token_price_usd} USD.")
+        elif amount_in_tokens_float is None and amount_in_usd is None:
+            error_msg = "Either amount_in_usd or amount_in_tokens_float must be provided for execute_swap."
             logger.error(error_msg)
-            return {'success': False, 'error': error_msg, 'data': None}
-        
-        input_decimals = token_info_response['data']['decimals']
-        amount_lamports = int(amount_in_tokens * (10**input_decimals))
+            return {"success": False, "error": error_msg, "signature": None, "details": None}
+        elif amount_in_tokens_float is not None:
+            logger.info(f"Amount in tokens provided: {amount_in_tokens_float} {input_token_mint}")
+        # If both are provided, amount_in_tokens_float takes precedence as per original logic, though this should be clarified.
 
-        logger.debug(f"Fetching swap routes for: {amount_in_tokens} ({amount_lamports} lamports) of {input_token_mint} to {output_token_mint}, slippage: {slippage_bps} BPS")
+        if amount_in_tokens_float <= 0:
+            error_msg = f"Amount to swap must be positive. Provided: {amount_in_tokens_float} {input_token_mint}"
+            logger.error(error_msg)
+            return {"success": False, "error": error_msg, "signature": None, "details": None}
 
-        # Appel à MarketDataProvider pour obtenir la quote de Jupiter
-        # MarketDataProvider.get_jupiter_swap_quote gère la construction de l'URL et l'appel API
-        quote_response = await self.market_data_provider.get_jupiter_swap_quote(
-            input_mint=input_token_mint,
-            output_mint=output_token_mint,
-            amount_lamports=amount_lamports, # amount is in lamports
+        try:
+            tx_signature = await self._execute_swap_attempt(
+                input_token_mint=input_token_mint,
+                output_token_mint=output_token_mint,
+                amount_in_tokens_float=amount_in_tokens_float,
+                slippage_bps=actual_slippage_bps
+            )
+            self.last_transaction_signature = tx_signature
+            duration = time.time() - start_time
+            logger.info(f"Swap successful for {input_token_mint} -> {output_token_mint}. Signature: {tx_signature}. Duration: {duration:.2f}s")
+            result = {
+                "success": True, 
+                "signature": tx_signature, 
+                "error": None, 
+                "duration_seconds": duration,
+                "details": {
+                    "input_token": input_token_mint,
+                    "output_token": output_token_mint,
+                    "amount_swapped_tokens": amount_in_tokens_float,
+                    # More details can be added here from quote_data if needed
+                }
+            }
+        except TransactionExpiredError as e:
+            # This is after retries by _execute_swap_attempt have failed.
+            duration = time.time() - start_time
+            logger.error(f"Swap failed after retries due to TransactionExpiredError: {e}. Duration: {duration:.2f}s", exc_info=True)
+            result = {"success": False, "error": f"Swap failed: Transaction expired after retries - {e}", "signature": e.signature, "duration_seconds": duration, "details": e}
+        except JupiterAPIError as e:
+            duration = time.time() - start_time
+            logger.error(f"Swap failed due to JupiterAPIError: {e}. Duration: {duration:.2f}s", exc_info=True)
+            result = {"success": False, "error": f"Swap failed: Jupiter API Error - {e}", "signature": None, "duration_seconds": duration, "details": e}
+        except SolanaTransactionError as e: # Covers Simulation, Broadcast, Confirmation errors
+            duration = time.time() - start_time
+            logger.error(f"Swap failed due to SolanaTransactionError: {e}. Duration: {duration:.2f}s", exc_info=True)
+            result = {"success": False, "error": f"Swap failed: Solana Transaction Error - {e}", "signature": e.signature, "duration_seconds": duration, "details": e}
+        except NumerusXBaseError as e: # Catch other app-specific errors
+            duration = time.time() - start_time
+            logger.error(f"Swap failed due to NumerusXBaseError: {e}. Duration: {duration:.2f}s", exc_info=True)
+            result = {"success": False, "error": f"Swap failed: Application Error - {e}", "signature": None, "duration_seconds": duration, "details": e}
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.critical(f"Unexpected critical error during swap: {e}. Duration: {duration:.2f}s", exc_info=True)
+            result = {"success": False, "error": f"Swap failed: Unexpected critical error - {e}", "signature": None, "duration_seconds": duration, "details": None}
+
+        self._record_transaction(result, {
+            "input_token_mint": input_token_mint,
+            "output_token_mint": output_token_mint,
+            "amount_in_tokens_float": amount_in_tokens_float,
+            "slippage_bps": actual_slippage_bps,
+            "attempted_amount_usd": amount_in_usd
+        })
+        return result
+
+    # Add tenacity retry for TransactionExpiredError around the core swap logic
+    @retry(
+        retry=retry_if_exception_type(TransactionExpiredError),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(Config.JUPITER_MAX_RETRIES if hasattr(Config, 'JUPITER_MAX_RETRIES') else 3),
+        reraise=True # Reraise TransactionExpiredError if all retries fail, to be caught by outer layer if needed
+    )
+    async def _execute_swap_attempt(
+        self, 
+        input_token_mint: str, 
+        output_token_mint: str, 
+        amount_in_tokens_float: float,
+        slippage_bps: int
+    ) -> str: # Returns transaction signature on success
+        """One attempt to perform the full quote -> get_tx_data -> sign_and_send flow."""
+        if not self.market_data_provider:
+            logger.error("MarketDataProvider not initialized in TradingEngine.")
+            raise RuntimeError("MarketDataProvider not initialized") # Or return error dict if preferred by execute_swap
+        if not self.jupiter_client:
+            logger.error("JupiterApiClient not initialized in TradingEngine.")
+            raise RuntimeError("JupiterApiClient not initialized")
+
+        # 1. Get quote from MarketDataProvider (which uses JupiterApiClient)
+        logger.info(f"Attempting to get swap quote: {amount_in_tokens_float} {input_token_mint} -> {output_token_mint}")
+        quote_response_dict = await self.market_data_provider.get_jupiter_swap_quote(
+            input_mint_str=input_token_mint,
+            output_mint_str=output_token_mint,
+            amount_in_tokens=amount_in_tokens_float,
             slippage_bps=slippage_bps
         )
 
-        if not quote_response['success']:
-            logger.error(f"Échec de l'obtention de la quote Jupiter: {quote_response.get('error', 'Erreur inconnue')}")
-            return {
-                'success': False, 
-                'error': f"Jupiter quote API error: {quote_response.get('error', 'Erreur inconnue')}", 
-                'data': quote_response.get('data') # Pass along the raw response from Jupiter if available
-            }
+        if not quote_response_dict.get("success") or not quote_response_dict.get("data"):
+            error_msg = f"Failed to get swap quote: {quote_response_dict.get('error', 'No quote data returned')}"
+            logger.error(error_msg)
+            # Decide if this should raise a specific error or be handled by the caller execute_swap to return a dict
+            raise JupiterAPIError(message=error_msg) # Propagate as JupiterAPIError to be caught by execute_swap
         
-        # La réponse de get_jupiter_swap_quote contient déjà la structure de données de la route Jupiter
-        # On l'enveloppe dans une liste car _select_best_quote s'attendait historiquement à une liste de routes.
-        # Jupiter v6 /quote API retourne directement la meilleure route, donc on a une liste d'un élément.
-        # Ensure routes_response['data'] is not None before wrapping in a list
-        if quote_response['data'] is None:
-            logger.error("Aucune donnée de route reçue de Jupiter malgré une réponse réussie.")
-            return {'success': False, 'error': 'No route data from Jupiter despite success response', 'data': None}
+        quote_data_from_sdk = quote_response_dict["data"] # This is the raw quote response from SDK
+        logger.info(f"Successfully obtained swap quote. Out amount: {quote_data_from_sdk.get('outAmount')} lamports.")
 
-        return {
-            'success': True, 
-            'data': [quote_response['data']], # Wrap the single Jupiter quote in a list
-            'error': None
-        }
-
-    async def _build_swap_transaction(self, route: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Construit la transaction de swap en utilisant l'API /swap de Jupiter.
-        Args:
-            route: La route de swap obtenue de l'API /quote (quoteResponse).
-        Returns:
-            Dictionnaire structuré: {'success': True/False, 'data': {'serialized_transaction_b64': str, 'last_valid_block_height': int}, 'error': 'message'}
-        """
-        logger.info(f"Building swap transaction for quote: {route.get('inputMint')}->{route.get('outputMint')}, outAmount: {route.get('outAmount')}")
-        if not self.wallet:
-            logger.error("Wallet not initialized for _build_swap_transaction.")
-            return {'success': False, 'error': "Wallet not initialized", 'data': None}
-
-        swap_api_url = Config.JUPITER_SWAP_URL
+        # 2. Get swap transaction data from JupiterApiClient
+        logger.info("Fetching swap transaction data from JupiterApiClient...")
+        # get_swap_transaction_data expects the raw quote response object from the SDK's quote call.
+        swap_tx_data_dict = await self.jupiter_client.get_swap_transaction_data(quote_data_from_sdk)
         
-        payload = {
-            "userPublicKey": str(self.wallet.pubkey()),
-            "wrapAndUnwrapSol": True, # Default, can be configurable
-            "quoteResponse": route, 
-            "asLegacyTransaction": False, # Prefer versioned transactions
-            # Optional: Add dynamicComputeUnitLimit, prioritizationFeeLamports from Config or dynamically
-            # "dynamicComputeUnitLimit": True, 
-            # "prioritizationFeeLamports": "auto" # or a specific value Config.JUPITER_PRIORITY_FEE_LAMPORTS
-        }
-        if Config.JUPITER_COMPUTE_UNIT_LIMIT_ENABLED:
-            payload["dynamicComputeUnitLimit"] = True
-        if Config.JUPITER_PRIORITY_FEE_LAMPORTS: # Can be "auto" or a number
-            payload["prioritizationFeeLamports"] = Config.JUPITER_PRIORITY_FEE_LAMPORTS
+        # get_swap_transaction_data now returns a dict {"serialized_transaction_b64": ..., "last_valid_block_height": ...} or raises
+        serialized_transaction_b64 = swap_tx_data_dict["serialized_transaction_b64"]
+        last_valid_block_height = swap_tx_data_dict["last_valid_block_height"]
+        logger.info(f"Successfully obtained swap transaction data. Last valid block height: {last_valid_block_height}")
 
-
-        headers = {"Content-Type": "application/json"}
-        if Config.JUPITER_API_KEY:
-            headers["Authorization"] = f"Bearer {Config.JUPITER_API_KEY}"
-
-        # Using MarketDataProvider's session if available and open, otherwise a new one
-        session_to_use = None
-        close_session_after = False
-        if self.market_data_provider and self.market_data_provider.session and not self.market_data_provider.session.closed:
-            session_to_use = self.market_data_provider.session
-        else:
-            session_to_use = aiohttp.ClientSession()
-            close_session_after = True
-            logger.debug("Created temporary ClientSession for Jupiter /swap call.")
-
-        try:
-            await self.market_data_provider._check_rate_limit("jupiter_swap") # Assume new category for swap
-            
-            logger.debug(f"Jupiter /swap request: POST {swap_api_url}, payload: {json.dumps(payload)[:200]}...") # Log partial payload
-            async with session_to_use.post(swap_api_url, json=payload, headers=headers, timeout=Config.API_TIMEOUT_SECONDS_JUPITER_SWAP) as response:
-                response_text = await response.text()
-                if response.status == 200:
-                    try:
-                        swap_data = json.loads(response_text)
-                        # Jupiter /swap returns: { swapTransaction: "base64_encoded_transaction", lastValidBlockHeight: number }
-                        if "swapTransaction" not in swap_data or "lastValidBlockHeight" not in swap_data:
-                            err_msg = f"Jupiter Swap API response missing 'swapTransaction' or 'lastValidBlockHeight'. Response: {swap_data}"
-                            logger.error(err_msg)
-                            return {'success': False, 'error': err_msg, 'data': swap_data}
-                        
-                        logger.info(f"Successfully built swap transaction. LastValidBlockHeight: {swap_data.get('lastValidBlockHeight')}")
-                        return {
-                            'success': True, 
-                            'data': {
-                                'serialized_transaction_b64': swap_data["swapTransaction"], 
-                                'last_valid_block_height': swap_data["lastValidBlockHeight"],
-                                'raw_response': swap_data
-                            }, 
-                            'error': None
-                        }
-                    except json.JSONDecodeError as e:
-                        logger.error(f"Jupiter Swap API JSONDecodeError. URL: {swap_api_url}. Error: {str(e)}. Response: {response_text}", exc_info=True)
-                        return {'success': False, 'error': f"JSONDecodeError: {str(e)}", 'data': {'response_text': response_text}}
-                else:
-                    error_message = f"Jupiter Swap API returned status {response.status}"
-                    try: # Try to parse error from Jupiter
-                        error_payload = json.loads(response_text)
-                        error_detail = error_payload.get('message', error_payload.get('error', response_text))
-                        if isinstance(error_detail, dict) and 'message' in error_detail: # Nested error
-                           error_detail = error_detail['message']
-                        error_message += f": {error_detail}"
-                    except json.JSONDecodeError:
-                        error_message += f": {response_text}"
-                    logger.error(f"{error_message}. URL: {swap_api_url}.") # Payload logging can be verbose, logged above partially
-                    return {'success': False, 'error': error_message, 'data': {'response_text': response_text}}
-
-        except aiohttp.ClientError as e:
-            logger.error(f"Jupiter Swap API ClientError. URL: {swap_api_url}. Error: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"ClientError: {str(e)}", 'data': None}
-        except asyncio.TimeoutError:
-            logger.error(f"Jupiter Swap API Timeout. URL: {swap_api_url}", exc_info=True)
-            return {'success': False, 'error': "TimeoutError", 'data': None}
-        except Exception as e:
-            logger.error(f"Unexpected error in _build_swap_transaction. URL: {swap_api_url}. Error: {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"UnexpectedError: {str(e)}", 'data': None}
-        finally:
-            if close_session_after and session_to_use:
-                await session_to_use.close()
-                logger.debug("Closed temporary ClientSession for Jupiter /swap call.")
-
-    async def _execute_transaction(self, serialized_transaction_b64: str, last_valid_block_height: int) -> Dict[str, Any]:
-        """
-        Signe, envoie la transaction VersionedTransaction au réseau Solana, et attend la confirmation.
-        Args:
-            serialized_transaction_b64: La transaction sérialisée en base64 obtenue de Jupiter /swap.
-            last_valid_block_height: La dernière hauteur de bloc valide pour la transaction.
-        Returns:
-            Dictionnaire structuré: {'success': True/False, 'data': {'signature': str, 'confirmation_response': ...}, 'error': 'message'}
-        """
-        if not self.wallet:
-            logger.error("Wallet not initialized for _execute_transaction.")
-            return {'success': False, 'error': "Wallet not initialized", 'data': None}
-        
-        # Ensure AsyncClient is healthy
-        if not self.client or not hasattr(self.client, 'http_client') or (hasattr(self.client, 'http_client') and self.client.http_client and self.client.http_client.closed):
-            logger.warning("AsyncClient was closed or not initialized. Recreating for _execute_transaction.")
-            if hasattr(self.client, 'http_client') and self.client.http_client: # Ensure client has http_client attribute
-                 await self.client.close() 
-            self.client = AsyncClient(self.rpc_url)
-
-        try:
-            # Deserialize the VersionedTransaction
-            try:
-                tx_bytes = base58.b58decode(serialized_transaction_b64)
-                transaction = Transaction.deserialize(tx_bytes)
-            except (TypeError, ValueError) as e_b64:
-                logger.error(f"Error decoding/deserializing base64 swapTransaction: {str(e_b64)}", exc_info=True)
-                return {'success': False, 'error': f"TransactionDeserializeError: {str(e_b64)}", 'data': None}
-
-            # Sign the VersionedTransaction with our wallet
-            # Jupiter /swap endpoint returns a transaction that needs to be signed by the user.
-            transaction.sign([self.wallet]) # VersionedTransaction.sign takes a list of signers
-
-            # Send the transaction
-            logger.info(f"Sending signed VersionedTransaction to Solana network...")
-            # The `send_transaction` method of AsyncClient handles both Transaction and VersionedTransaction.
-            send_tx_resp = await self.client.send_transaction(transaction, opts=self.client.commitment_opts(skip_preflight=Config.SOLANA_SKIP_PREFLIGHT))
-            signature_obj = send_tx_resp.value 
-            signature_str = str(signature_obj)
-            logger.info(f"Transaction sent. Signature: {signature_str}")
-            self.last_transaction_signature = signature_str
-            self.transaction_history.append(signature_str) # Keep track
-
-            # Confirm the transaction
-            logger.info(f"Waiting for transaction confirmation for {signature_str} (LastValidBlockHeight: {last_valid_block_height})...")
-            
-            # Using confirm_transaction with last_valid_block_height for versioned transactions
-            confirmation_resp = await self.client.confirm_transaction(
-                signature_obj,
-                commitment=Config.SOLANA_COMMITMENT, 
-                last_valid_block_height=last_valid_block_height,
-                sleep_seconds=Config.SOLANA_CONFIRMATION_SLEEP_SECONDS 
-            )
-            
-            # confirmation_resp.value is a list of RpcResponseContext(RpcSimulateTransactionResult)
-            # We are interested in confirmation_resp.value[0].err
-            if confirmation_resp.value and confirmation_resp.value[0].err is None:
-                logger.info(f"Transaction confirmed successfully: {signature_str}")
-                return {'success': True, 'data': {'signature': signature_str, 'confirmation_status': confirmation_resp.value[0]}, 'error': None}
-            elif confirmation_resp.value and confirmation_resp.value[0].err:
-                error_detail = f"Transaction failed confirmation: {confirmation_resp.value[0].err}"
-                logger.error(f"{error_detail}. Signature: {signature_str}. Logs: {confirmation_resp.value[0].logs}")
-                return {'success': False, 'error': error_detail, 'data': {'signature': signature_str, 'confirmation_response': confirmation_resp.value[0]}}
-            else: 
-                # This case means the confirmation response itself was unusual or empty.
-                logger.error(f"Transaction confirmation unclear for {signature_str}. Raw response: {confirmation_resp}")
-                return {'success': False, 'error': "Transaction confirmation unclear or timed out waiting for block height.", 
-                        'data': {'signature': signature_str, 'raw_response': confirmation_resp.to_json() if confirmation_resp else None}}
-
-        except solana.rpc.core.RPCException as rpc_e: # Catch specific Solana RPC errors
-            logger.error(f"Solana RPCException during transaction execution: {str(rpc_e)}", exc_info=True)
-            # Try to extract more details if possible, e.g. from rpc_e.args or specific RPC error codes
-            error_message = f"Solana RPCException: {str(rpc_e)}"
-            # Example: if "BlockhashNotFound" in str(rpc_e): ...
-            return {'success': False, 'error': error_message, 'data': None}
-        except (aiohttp.ClientError, ConnectionRefusedError, aiohttp.ClientConnectorError) as conn_e:
-            error_type = type(conn_e).__name__
-            logger.error(f"Solana RPC {error_type}: {str(conn_e)}. URL: {self.rpc_url}", exc_info=True)
-            return {'success': False, 'error': f"Solana RPC {error_type}: {str(conn_e)}", 'data': None}
-        except asyncio.TimeoutError: 
-            logger.error(f"Solana RPC Timeout while executing transaction. URL: {self.rpc_url}", exc_info=True)
-            return {'success': False, 'error': "Solana RPC Timeout", 'data': None}
-        except Exception as e: 
-            error_type = type(e).__name__
-            logger.error(f"Unexpected error during Solana transaction execution ({error_type}): {str(e)}", exc_info=True)
-            return {'success': False, 'error': f"Solana transaction execution error ({error_type}): {str(e)}", 'data': None}
-
-    async def _execute_fallback_swap(self, input_token: str, output_token: str, 
-                                   amount_in: float, slippage_bps: int) -> Dict[str, Any]:
-        """
-        Implémente un mécanisme de repli si le swap principal échoue.
-        Actuellement, cela pourrait tenter une route de Jupiter différente si l'API en fournissait plusieurs,
-        ou utiliser un autre DEX (non implémenté). Pour l'instant, c'est un placeholder.
-        Returns a structured response.
-        """
-        logger.warning(f"Fallback swap for {amount_in} {input_token} to {output_token} initiated.")
-        # TODO: Implement actual fallback logic.
-        # This might involve:
-        # 1. Trying a different quote from Jupiter if multiple were fetched (not current design of _get_swap_routes).
-        # 2. Trying a different DEX (e.g., Raydium, Orca) via a different adapter if available.
-        # 3. Adjusting slippage or amount slightly.
-        
-        # For now, simply log and return failure.
-        error_message = "Fallback swap mechanism not fully implemented."
-        logger.error(error_message)
-        return {'success': False, 'error': error_message, 'data': None}
+        # 3. Sign and send transaction using JupiterApiClient
+        logger.info("Signing and sending transaction...")
+        # sign_and_send_transaction now returns signature string or raises SolanaTransactionError subtypes
+        tx_signature_str = await self.jupiter_client.sign_and_send_transaction(
+            serialized_transaction_b64=serialized_transaction_b64,
+            last_valid_block_height=last_valid_block_height
+        )
+        logger.info(f"Swap transaction successfully sent and confirmed. Signature: {tx_signature_str}")
+        return tx_signature_str
 
     def _record_transaction(self, result: Dict[str, Any], details: Dict[str, Any]) -> None:
         """Enregistre les détails d'une transaction dans l'historique."""
@@ -676,3 +532,101 @@ class TradingEngine:
         
         self.transaction_history.append(transaction_record)
         self.last_transaction_signature = result.get("signature")
+
+    async def _get_api_session(self) -> aiohttp.ClientSession:
+        """Returns an active aiohttp.ClientSession."""
+        if self._api_session is None or self._api_session.closed:
+            # You might want to configure connectors, timeouts, etc.
+            self._api_session = aiohttp.ClientSession()
+        return self._api_session
+
+    async def _close_api_session(self):
+        """Closes the aiohttp.ClientSession if it exists and is open."""
+        if self._api_session and not self._api_session.closed:
+            await self._api_session.close()
+            self._api_session = None
+
+    async def _make_jupiter_api_request(self, method: str, endpoint: str, params: Optional[Dict] = None, data: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        Helper function to make requests to Jupiter API with standardized error handling.
+        Args:
+            method: HTTP method (GET, POST).
+            endpoint: Jupiter API endpoint (e.g., /quote, /swap).
+            params: Query parameters for GET requests.
+            data: JSON body for POST requests.
+        Returns:
+            A dictionary {'success': bool, 'error': str|None, 'data': Any|None}.
+        """
+        session = await self._get_api_session()
+        url = f"{Config.JUPITER_API_V6_URL}{endpoint}"
+        request_context = f"Jupiter API: {method} {url}, Params: {params}, Data: {data}"
+        logger.debug(f"Making request: {request_context}")
+
+        headers = {}
+        if Config.JUPITER_API_KEY: # Add API key if configured
+            headers["Authorization"] = f"Bearer {Config.JUPITER_API_KEY}"
+
+        try:
+            async with session.request(method, url, params=params, json=data, headers=headers, timeout=Config.API_TIMEOUT_SECONDS_JUPITER_QUOTE) as response:
+                response_text = await response.text()
+                # Jupiter API can return 200 OK with an error object in the body
+                # e.g., {"errorCode":"QUOTE_NOT_FOUND","message":"..."}
+                # So, we parse JSON first, then check for actual success based on content if status is 200.
+                
+                try:
+                    response_data = json.loads(response_text)
+                except json.JSONDecodeError as e:
+                    # If status is 200 but JSON is invalid, it's an issue.
+                    if response.status == 200:
+                        log_msg = f"JSONDecodeError for successful (200) {request_context}. Response text: '{response_text}'. Error: {str(e)}"
+                        logger.error(log_msg)
+                        return {'success': False, 'error': f"Invalid JSON response from Jupiter: {str(e)}", 'data': None}
+                    # If status is not 200 and JSON is invalid, prioritize HTTP error.
+                    response.raise_for_status() # This will raise for non-200 status, to be caught below.
+                    # Should not be reached if status is not 200, but as a fallback:
+                    return {'success': False, 'error': f"Non-JSON error response (HTTP {response.status}) and JSON decode failed: {response_text[:200]}", 'data': None}
+
+                logger.debug(f"Jupiter API Response from {url} (status {response.status}): {response_data}")
+
+                if response.status == 200:
+                    # For Jupiter, a 200 can still contain an error payload like `errorCode`
+                    if isinstance(response_data, dict) and response_data.get("errorCode"):
+                        error_message = response_data.get("message", "Jupiter API returned an error code.")
+                        full_error = f"{response_data.get('errorCode')}: {error_message}"
+                        logger.warning(f"Jupiter API success (200) but returned error payload: {full_error} for {request_context}. Payload: {response_data}")
+                        return {'success': False, 'error': full_error, 'data': response_data} # include data for inspection
+                    return {'success': True, 'error': None, 'data': response_data}
+                else:
+                    # Handle non-200 responses that might have a JSON body with error details
+                    error_message = f"Jupiter API Error (HTTP {response.status})"
+                    if isinstance(response_data, dict):
+                        detail = response_data.get("message", response_data.get("error", {}).get("message", str(response_data)))
+                        error_message += f": {detail}"
+                    else:
+                        error_message += f": {response_text[:200]}"
+                    logger.error(f"{error_message} for {request_context}")
+                    return {'success': False, 'error': error_message, 'data': response_data if isinstance(response_data, dict) else None}
+
+        except aiohttp.ClientResponseError as e: # Catches 4xx/5xx errors if raise_for_status() was hit or non-200 initially
+            log_msg = f"ClientResponseError (HTTP {e.status}) for {request_context}. Message: {e.message}. Response text: '{e.history[0].text if e.history and hasattr(e.history[0], 'text') else response_text if 'response_text' in locals() else ''}'"
+            logger.error(log_msg)
+            # Try to parse error from response_text if available
+            error_detail = e.message
+            if 'response_text' in locals():
+                try: 
+                    error_json = json.loads(response_text)
+                    error_detail = error_json.get("message", error_json.get("error", e.message))
+                except json.JSONDecodeError: pass # Stick with original e.message
+            return {'success': False, 'error': f"Jupiter API HTTP Error ({e.status}): {error_detail}", 'data': None}
+        except aiohttp.ClientError as e: # Other client-side errors
+            log_msg = f"ClientError for {request_context}. Error: {str(e)}"
+            logger.error(log_msg, exc_info=True)
+            return {'success': False, 'error': f"Jupiter Network/Client Error: {str(e)}", 'data': None}
+        except asyncio.TimeoutError:
+            log_msg = f"TimeoutError for {request_context}."
+            logger.error(log_msg, exc_info=True)
+            return {'success': False, 'error': "Jupiter API request timed out", 'data': None}
+        except Exception as e:
+            log_msg = f"Unexpected error during Jupiter API request for {request_context}. Error: {str(e)}"
+            logger.error(log_msg, exc_info=True)
+            return {'success': False, 'error': f"An unexpected error occurred with Jupiter API: {str(e)}", 'data': None}

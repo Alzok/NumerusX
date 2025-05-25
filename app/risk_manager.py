@@ -15,16 +15,21 @@ logger = logging.getLogger("risk_manager")
 @dataclass
 class Position:
     """Classe représentant une position de trading."""
+    id: Optional[str] # Unique ID for the trade, often the transaction signature
     token_address: str
     token_symbol: str
     entry_price: float
-    size: float
+    size_usd: float # Value of the position in USD at entry
+    size_tokens: float # Quantity of the token held
     entry_time: float
+    trade_type: str # 'BUY' or 'SELL' (SELL could indicate closing a long or opening a short)
     stop_loss: Optional[float] = None
     take_profit: Optional[float] = None
-    trailing_stop: Optional[float] = None
-    trailing_distance: Optional[float] = None
-    id: Optional[str] = None
+    trailing_stop: Optional[float] = None # Current value of the trailing stop loss
+    trailing_distance: Optional[float] = None # Percentage or fixed amount for trailing stop
+    # current_price: Optional[float] = None # For P&L calculation, could be updated periodically
+    # pnl_usd: Optional[float] = None
+    # pnl_percentage: Optional[float] = None
 
 @dataclass
 class RiskMetrics:
@@ -148,59 +153,121 @@ class RiskManager:
         # Cette fonction pourrait fermer automatiquement les positions les plus risquées
         # ou suspendre complètement le trading jusqu'à une intervention manuelle
     
-    def calculate_position_size(self, token_address: str, token_symbol: str, 
-                                entry_price: float, stop_loss: Optional[float] = None) -> float:
+    def calculate_position_size(
+        self, 
+        token_address: str, 
+        token_symbol: str, 
+        entry_price: float, 
+        proposed_amount_usd: Optional[float] = None, # Agent's desired investment in USD
+        stop_loss_price: Optional[float] = None, # Renamed from stop_loss for clarity
+        agent_confidence: Optional[float] = None # Optional confidence from agent
+    ) -> float:
         """
-        Calcule la taille optimale d'une position en utilisant le critère de Kelly.
+        Calcule la taille optimale et sûre d'une position en USD.
+        Prend en compte le critère de Kelly, la volatilité, le risque par trade,
+        la taille maximale de position, et la proposition de l'agent.
         
         Args:
             token_address: Adresse du token
             token_symbol: Symbole du token
-            entry_price: Prix d'entrée
-            stop_loss: Prix de stop-loss (optionnel)
+            entry_price: Prix d'entrée estimé
+            proposed_amount_usd: Montant en USD proposé par l'agent (optionnel)
+            stop_loss_price: Prix de stop-loss (optionnel)
+            agent_confidence: Score de confiance de l'agent (optionnel, pour info/future use)
             
         Returns:
-            Taille de position recommandée en unités monétaires
+            Taille de position recommandée en USD. 0 si le trade est trop risqué ou non viable.
         """
-        # Obtenir l'historique des performances de ce token
+        if entry_price <= 0:
+            logger.warning(f"[RiskManager] Prix d'entrée invalide ({entry_price}) pour {token_symbol}. Calcul de taille impossible.")
+            return 0.0
+
+        # 1. Calcul basé sur Kelly / Volatilité (comme avant)
         win_rate, avg_win_pct, avg_loss_pct = self._get_token_performance_metrics(token_address)
+        calculated_size_kelly_vol = 0.0
+
+        if win_rate is not None and avg_win_pct is not None and avg_loss_pct is not None and avg_win_pct > 0:
+            numerator = (win_rate * avg_win_pct - (1 - win_rate) * avg_loss_pct)
+            if numerator > 0:
+                kelly_fraction = numerator / avg_win_pct
+                conservative_fraction = kelly_fraction * 0.5  # Half-Kelly
+                # Consider agent_confidence to scale kelly_fraction further if needed (e.g. * agent_confidence)
+                if agent_confidence is not None:
+                    conservative_fraction *= agent_confidence # Modulate by agent confidence
+                calculated_size_kelly_vol = self.portfolio_value * conservative_fraction
+            else:
+                logger.info(f"[RiskManager] Critère de Kelly non positif pour {token_symbol}. Espérance négative.")
+                # Ne pas trader si Kelly est négatif, sauf si on se base purement sur la volatilité/SL
+        else: # Pas de métriques de perf, utiliser volatilité
+            volatility = self._get_token_volatility(token_address) or 0.03  # Default ATR or daily volatility
+            calculated_size_kelly_vol = self._calculate_volatility_based_position_size(volatility)
         
-        # Si nous n'avons pas d'historique, utiliser une approche basée sur la volatilité
-        if win_rate is None:
-            volatility = self._get_token_volatility(token_address) or 0.03  # Valeur par défaut
-            return self._calculate_volatility_based_position_size(volatility)
+        # Assurer que calculated_size_kelly_vol n'est pas négatif ou trop petit
+        calculated_size_kelly_vol = max(0.0, calculated_size_kelly_vol)
+
+        # 2. Calcul basé sur le Stop-Loss (si fourni)
+        calculated_size_sl = float('inf') # Initialize to infinity, effectively no limit if SL not used
+        if stop_loss_price is not None and entry_price > 0:
+            if entry_price == stop_loss_price: # Avoid division by zero
+                logger.warning(f"[RiskManager] Entry price and stop_loss_price are identical for {token_symbol}. Cannot calculate size based on SL.")
+                # This implies zero risk per unit if trade goes wrong instantly, which is problematic.
+                # Set to a very small size or 0, or rely on other methods.
+                calculated_size_sl = Config.MIN_ORDER_VALUE_USD # Or 0.0 if this case should prevent trade
+            else:
+                risk_per_unit_fraction = abs(entry_price - stop_loss_price) / entry_price
+                if risk_per_unit_fraction > 0:
+                    max_risk_amount_for_trade = self.portfolio_value * self.target_risk_per_trade
+                    calculated_size_sl = max_risk_amount_for_trade / risk_per_unit_fraction
+                else: # Should not happen if entry_price != stop_loss_price
+                    calculated_size_sl = Config.MIN_ORDER_VALUE_USD # Default to min size if risk_per_unit_fraction is zero for some reason
+        
+        # Taille maximale de position (pourcentage du portefeuille)
+        max_size_by_pct_portfolio = self.portfolio_value * self.max_position_size_pct
+
+        # Log des tailles calculées intermédiaires
+        logger.debug(f"[RiskManager] {token_symbol} - Taille Kelly/Vol: ${calculated_size_kelly_vol:.2f}, Taille SL: ${calculated_size_sl:.2f if calculated_size_sl != float('inf') else 'N/A'}")
+
+        # La taille finale est le MINIMUM de ces calculs pour être conservateur
+        final_calculated_size = min(calculated_size_kelly_vol if calculated_size_kelly_vol > 0 else float('inf'), calculated_size_sl)
+        final_calculated_size = min(final_calculated_size, max_size_by_pct_portfolio)
+        
+        # Si la taille calculée est infime (ou inf), cela signifie qu'une des méthodes n'a pas pu calculer
+        # ou a estimé le risque trop haut. On pourrait mettre un seuil minimal.
+        if final_calculated_size == float('inf') or final_calculated_size < Config.MIN_ORDER_VALUE_USD / 2: # Allow slightly below MIN_ORDER_VALUE if other calcs are good
+            # This case means either SL size was inf (no SL) AND Kelly/Vol size was 0 or inf.
+            # Or, the min of all constraints led to a very small value.
+            # If Kelly/Vol was positive, use that, otherwise it might be risky.
+            if calculated_size_kelly_vol > Config.MIN_ORDER_VALUE_USD / 2 and calculated_size_kelly_vol < max_size_by_pct_portfolio : # Check if Kelly/Vol was reasonable
+                 final_calculated_size = calculated_size_kelly_vol
+            elif calculated_size_sl != float('inf') and calculated_size_sl > Config.MIN_ORDER_VALUE_USD / 2 and calculated_size_sl < max_size_by_pct_portfolio:
+                 final_calculated_size = calculated_size_sl # Fallback to SL if Kelly/Vol was zero
+            else:
+                logger.info(f"[RiskManager] {token_symbol} - Taille calculée finale trop petite ou non déterminée avant contraintes agent/portefeuille. Taille brute: {final_calculated_size}")
+                final_calculated_size = 0.0 # Default to 0 if no reasonable size found
+
+        # Maintenant, considérer la proposition de l'agent
+        if proposed_amount_usd is not None:
+            if proposed_amount_usd <= 0:
+                logger.info(f"[RiskManager] Proposition de taille de l'agent pour {token_symbol} est <= 0. Trade ignoré.")
+                return 0.0
+            # L'agent propose une taille. On prend le MIN de la proposition de l'agent et de notre calcul sécurisé.
+            final_size = min(proposed_amount_usd, final_calculated_size)
+            logger.info(f"[RiskManager] {token_symbol} - Taille Proposée Agent: ${proposed_amount_usd:.2f}, Taille Calculée RM: ${final_calculated_size:.2f}. Décision: ${final_size:.2f}")
+        else:
+            # Pas de proposition de l'agent, on utilise notre calcul
+            final_size = final_calculated_size
+            logger.info(f"[RiskManager] {token_symbol} - Pas de proposition Agent. Taille Calculée RM: ${final_calculated_size:.2f}. Décision: ${final_size:.2f}")
+
+        # Appliquer des contraintes de portefeuille supplémentaires (diversification, corrélation)
+        final_size = self._apply_portfolio_constraints(token_address, final_size)
+
+        # Assurer que la taille finale n'est pas en dessous du minimum acceptable pour un trade
+        if final_size < Config.MIN_ORDER_VALUE_USD:
+            logger.info(f"[RiskManager] Taille finale pour {token_symbol} (${final_size:.2f}) < Min Order Value (${Config.MIN_ORDER_VALUE_USD}). Trade annulé.")
+            return 0.0
             
-        # Calculer la taille de position selon Kelly
-        # Formule: f* = (win_rate * avg_win_pct - (1 - win_rate) * avg_loss_pct) / avg_win_pct
-        numerator = (win_rate * avg_win_pct - (1 - win_rate) * avg_loss_pct)
-        
-        # Si la formule donne un résultat négatif, cela signifie que l'espérance est négative
-        if numerator <= 0:
-            logger.warning(f"Critère de Kelly négatif pour {token_symbol} - espérance mathématique négative")
-            return 0
-            
-        kelly_fraction = numerator / avg_win_pct
-        
-        # Appliquer une fraction du Kelly pour être plus conservateur (half-Kelly)
-        conservative_fraction = kelly_fraction * 0.5  # Utiliser la moitié du Kelly
-        
-        # Calculer la taille monétaire
-        position_size = self.portfolio_value * min(conservative_fraction, self.max_position_size_pct)
-        
-        # Si un stop-loss est fourni, ajuster la taille pour respecter le risque par trade
-        if stop_loss and entry_price > 0:
-            risk_per_unit = abs(entry_price - stop_loss) / entry_price
-            if risk_per_unit > 0:
-                max_risk_amount = self.portfolio_value * self.target_risk_per_trade
-                alternative_size = max_risk_amount / risk_per_unit
-                position_size = min(position_size, alternative_size)
-                
-        logger.info(f"Taille de position calculée pour {token_symbol}: ${position_size:.2f} (Kelly: {kelly_fraction:.4f})")
-        
-        # Vérifier les contraintes additionnelles comme la diversification
-        position_size = self._apply_portfolio_constraints(token_address, position_size)
-        
-        return position_size
+        logger.info(f"[RiskManager] Taille de position finale décidée pour {token_symbol}: ${final_size:.2f}")
+        return final_size
     
     def _calculate_volatility_based_position_size(self, volatility: float) -> float:
         """
@@ -317,7 +384,7 @@ class RiskManager:
             position.id = f"pos_{len(self.positions)}_{int(time.time())}"
             
         self.positions[position.token_address] = position
-        logger.info(f"Position ajoutée: {position.token_symbol} - {position.size:.2f} unités à {position.entry_price:.6f}")
+        logger.info(f"Position ajoutée: {position.token_symbol} - {position.size_usd:.2f} USD à {position.entry_price:.6f}")
         
         return position.id
     
@@ -405,7 +472,7 @@ class RiskManager:
             Objet RiskMetrics contenant les mesures de risque calculées
         """
         # Calculer la valeur actuelle du portefeuille
-        current_exposure = sum(pos.size * self._get_current_price(pos.token_address)
+        current_exposure = sum(pos.size_usd * self._get_current_price(pos.token_address)
                                for pos in self.positions.values())
         
         # Calculer la volatilité du portefeuille
@@ -421,7 +488,7 @@ class RiskManager:
         sharpe = await self._calculate_sharpe_ratio()
         
         # Trouver la position la plus grande
-        max_position = max((pos.size for pos in self.positions.values()), default=0)
+        max_position = max((pos.size_usd for pos in self.positions.values()), default=0)
         
         # Générer la matrice de corrélation (simplifiée pour l'exemple)
         correlation_matrix = await self._calculate_correlation_matrix()
@@ -457,7 +524,7 @@ class RiskManager:
         # Pour un niveau de confiance de 95%, le z-score est environ 1.645
         z_score = 1.645 if confidence == 0.95 else 2.326  # 2.326 pour 99%
         
-        portfolio_value = sum(pos.size for pos in self.positions.values())
+        portfolio_value = sum(pos.size_usd for pos in self.positions.values())
         
         # VaR quotidienne (avec l'hypothèse d'une distribution normale)
         var = portfolio_value * portfolio_volatility * z_score
@@ -516,7 +583,7 @@ class RiskManager:
         for addr, position in self.positions.items():
             volatility = self._get_token_volatility(addr) or 0.03  # Valeur par défaut
             price = self._get_current_price(addr)
-            position_value = position.size * price
+            position_value = position.size_usd * price
             weighted_volatility += position_value * volatility
             total_weight += position_value
             
@@ -628,12 +695,12 @@ class RiskManager:
         # Détails des positions
         for addr, pos in self.positions.items():
             current_price = self._get_current_price(addr)
-            pnl = (current_price - pos.entry_price) * pos.size
+            pnl = (current_price - pos.entry_price) * pos.size_usd
             pnl_pct = (current_price / pos.entry_price - 1) * 100 if pos.entry_price > 0 else 0
             
             report['positions'][addr] = {
                 'symbol': pos.token_symbol,
-                'size': pos.size,
+                'size_usd': pos.size_usd,
                 'entry_price': pos.entry_price,
                 'current_price': current_price,
                 'pnl': pnl,
