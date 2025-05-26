@@ -292,22 +292,27 @@ Les modules de cette couche sont redéfinis pour agir comme des fournisseurs d'i
 
 -   Envisager un versionnement du document d'architecture au fur et à mesure de l'évolution du projet.
 
-## VI. Considérations Futures / Améliorations
+## VIII. Considérations Futures / Améliorations (Revue Stratégique)
 
--   **Backtesting de l'Agent IA**: Développer des outils pour backtester la performance de l'Agent IA lui-même, en simulant le flux d'inputs qu'il aurait reçu.
--   **Apprentissage Continu**: Mettre en place des mécanismes pour que l'Agent IA puisse apprendre et s'adapter avec le temps (ex: RL, feedback sur ses propres trades).
--   **Optimisation des Prompts pour Gemini**: Affiner continuellement les prompts pour améliorer la qualité des décisions et la gestion des tokens.
--   **Diversification des Modèles d'IA**: Envisager l'intégration d'autres modèles (spécialisés ou généralistes) en parallèle ou en fallback de Gemini au sein de l'`AIAgent`.
--   **Simulation Avancée ("Digital Twin")**: Développer un jumeau numérique de l'environnement de trading pour des tests et optimisations plus poussés.
+* **Backtesting de l'Agent IA**: Développer des outils pour backtester la performance de l'Agent IA lui-même, en simulant le flux d'inputs qu'il aurait reçu.
+* **Apprentissage Continu**: Mettre en place des mécanismes pour que l'Agent IA puisse apprendre et s'adapter avec le temps (ex: RL, feedback sur ses propres trades).
+* **Optimisation des Prompts pour Gemini**: Affiner continuellement les prompts pour améliorer la qualité des décisions et la gestion des tokens.
+* **Diversification des Modèles d'IA**: Envisager l'intégration d'autres modèles (spécialisés ou généralistes) en parallèle ou en fallback de Gemini au sein de l'`AIAgent`.
+* **Simulation Avancée ("Digital Twin")**: Développer un jumeau numérique de l'environnement de trading pour des tests et optimisations plus poussés.
 
-## Points d'Attention / Risques / Ambiguïtés (0-architecte.md)
+## Points d'Attention / Risques / Ambiguïtés (0-architecte.md - Étendu avec Revue Stratégique)
 * **Complexité**: L'architecture proposée est complète avec de nombreux composants interconnectés ; la gestion de cette complexité sera un défi.
 * **Dépendance IA Agent**: La performance et la fiabilité de l'AIAgent (via Google Gemini initialement) sont critiques. Dépendance aux APIs externes (disponibilité, coût, limitations).
-* **Flux de Données**: Les formats et schémas exacts pour la communication inter-modules, notamment les `aggregated_inputs` pour l'AIAgent, nécessitent une définition méticuleuse.
+* **Flux de Données**: Les formats et schémas exacts pour la communication inter-modules, notamment les `aggregated_inputs` pour l'AIAgent, nécessitent une définition méticuleuse et une validation continue de leur peuplement complet.
 * **Scalabilité AIAgent**: Anticiper les goulots d'étranglement potentiels de l'AIAgent.
 * **Évolution des "Stratégies"**: Le rôle des stratégies comme fournisseurs de signaux/features pour l'AIAgent est un changement conceptuel important.
 * **Rôle du `StrategySelector`**: L'interaction avec l'AIAgent doit être implémentée avec soin pour que l'AIAgent utilise efficacement les entrées pré-filtrées.
 * **Remplacement UI**: Le passage de NiceGUI à React/FastAPI est un changement majeur.
+* **Authentification et API Backend**: Standardisation nécessaire entre les mécanismes d'authentification potentiellement dupliqués (`app.security.security` vs. `app.utils.auth`) et consolidation des points d'entrée API (`app.main.py` vs. `app.api_routes.py`).
+* **Initialisation des Dépendances**: Clarifier l'injection de dépendances pour des composants comme `MarketDataProvider` dans `TradingEngine`.
 
-### Suggestions
+### Suggestions (0-architecte.md - Étendu avec Revue Stratégique)
 * Envisager un versionnement du document d'architecture au fur et à mesure de l'évolution du projet.
+* **Standardiser le Logging**: Migrer vers l'utilisation standard de `logging.getLogger(__name__)` et supprimer les loggers custom comme `DexLogger`.
+* **Validation des Données**: Renforcer la validation des données à toutes les interfaces, notamment pour la base de données (`EnhancedDatabase.record_trade`) et les réponses de l'IA (Pydantic pour la réponse Gemini).
+* **Configuration Claire**: Rendre les configurations clés (ex: coûts de tokens Gemini, `max_output_tokens`) explicites dans `app.config.py`.

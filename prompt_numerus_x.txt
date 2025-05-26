@@ -1,0 +1,74 @@
+ J'ai besoin de ton expertise pour une revue approfondie et une planification stratégique de mon projet de trading algorithmique NumerusX. L'objectif est d'identifier les points d'amélioration, de générer des instructions précises pour mon IA d'IDE afin qu'elle puisse effectuer les corrections/évolutions, et de définir un plan d'action (TODO.md) clair et cohérent pour aboutir à une application robuste, performante et alignée sur son architecture cible.
+
+Contexte Spécifique du Projet NumerusX :
+
+L'architecture de NumerusX, telle que détaillée dans les fichiers README.md et todo/0-architecte.md, est centrée sur un AIAgent (utilisant Google Gemini via GeminiClient) qui prend les décisions de trading finales. Cet AIAgent est alimenté par des aggregated_inputs préparés par le DexBot. Ces inputs proviennent de divers modules :
+
+MarketDataProvider: Fournit les données de marché (prix, OHLCV, liquidité) via JupiterApiClient (pour Jupiter v6) et des fallbacks (DexScreener).
+Modules de Signaux/Analyse:
+AnalyticsEngine (AdvancedTradingStrategy): Analyse technique avancée.
+PredictionEngine (PricePredictor, MarketRegimeClassifier, SentimentAnalyzer): Prédictions IA, classification de régime, analyse de sentiment.
+StrategyFramework et app/strategies/* (MomentumStrategy, MeanReversionStrategy, TrendFollowingStrategy): Stratégies spécifiques agissant comme fournisseurs de signaux/features.
+StrategySelector: Peut pré-filtrer ou enrichir les signaux des stratégies pour l'AIAgent.
+Modules de Contrôle/Validation:
+RiskManager: Fournit les contraintes de risque et la taille de position potentielle.
+SecurityChecker: Évalue la sécurité des tokens.
+PortfolioManager: Donne l'état actuel du portefeuille.
+Le flux de décision principal est : DexBot collecte et agrège les inputs -> AIAgent (via GeminiClient) décide -> DexBot transmet l'ordre à TradeExecutor -> TradingEngine (via JupiterApiClient) exécute sur Solana.
+
+Le backend (FastAPI, dans app/main.py) expose une API REST et des WebSockets (Socket.io) pour une UI React (numerusx-ui/) qui permet le monitoring et le contrôle. L'authentification est prévue via Clerk/Auth0 (voir app/utils/auth.py).
+
+Ce que je te fournis (liste non exhaustive des fichiers clés) :
+
+L'ensemble du code source Python du projet (dans app/, app/ai_agent/, app/market/, app/strategies/, app/trading/, app/utils/, etc.).
+Les fichiers de configuration et de dépendances (app/config.py, requirements.txt, Docker/docker-compose.yml).
+La documentation principale (README.md).
+Les fichiers de planification et d'architecture (todo/0-architecte.md, todo/01-todo-core.md, todo/01-todo-ui.md, todo/02-todo-ai-api-gemini.md, todo/03-todo-advanced-features.md).
+Les tests existants (tests/).
+Tes Tâches Détaillées :
+
+Analyse Complète du Code Source Fourni :
+
+Identifie les erreurs de logique, bugs potentiels, anti-patterns, et opportunités d'optimisation dans le code Python.
+Vérifie la robustesse, la sécurité (focus sur la gestion des clés API pour Jupiter/Gemini, la validation des inputs API, et les interactions blockchain).
+Évalue la maintenabilité, la clarté et la cohérence du code.
+Porte une attention particulière à l'implémentation de DexBot._gather_ai_agent_inputs et AIAgent.decide_trade (y compris la construction du prompt Gemini et le parsing de la réponse).
+Analyse la gestion des erreurs et la résilience de JupiterApiClient, TradingEngine, et GeminiClient.
+Identifie les éventuelles duplications de code ou incohérences (ex: systèmes d'authentification dans app/security/security.py vs app/utils/auth.py).
+Examen des Fichiers README.md et TODO (todo/0-architecte.md, todo/01-todo-core.md, etc.) :
+
+Évalue l'alignement du README.md avec le code actuel et l'architecture cible décrite dans todo/0-architecte.md.
+Analyse les fichiers TODO :
+Les tâches sont-elles toujours pertinentes, claires, et correctement priorisées ?
+Y a-t-il des manques ou des incohérences par rapport à l'objectif d'une "application parfaite" et à l'architecture cible ?
+Les tâches marquées comme complétées sont-elles effectivement et correctement implémentées ?
+Identification des Incohérences et Points de Friction :
+
+Relève toute divergence entre le code, la documentation, les fichiers TODO, et l'architecture cible (communication Backend API -> Frontend, rôle de l'AIAgent interne vs. une "IA intégrée à l'IDE" qui prendrait les décisions, flux de décision, interaction avec Jupiter API).
+Clarification Cruciale du Flux de Décision IA : Confirme si l'architecture actuelle où AIAgent (avec Gemini) est le décideur interne à NumerusX est l'objectif final, ou si l'architecture doit être modifiée pour que l'IA de mon IDE (externe au backend) reçoive les aggregated_inputs via une API, prenne la décision, et renvoie l'ordre. (Si le second cas, spécifier les modifications API nécessaires sur le backend NumerusX). Pour l'instant, base-toi sur l'architecture d'un AIAgent interne.
+Valide la structure et le contenu des aggregated_inputs pour l'AIAgent pour s'assurer qu'ils fournissent toutes les informations nécessaires pour une prise de décision optimale par Gemini, comme décrit dans todo/02-todo-ai-api-gemini.md.
+Génération d'Instructions pour l'IA de l'IDE (Assistance au Développement) :
+
+Pour chaque erreur, incohérence, ou point d'amélioration identifié, fournis des instructions spécifiques, claires, et actionnables que je pourrai donner à mon IA intégrée à l'IDE.
+Ces instructions doivent être formulées comme des directives de refactoring, de correction de bug, ou d'implémentation de fonctionnalités manquantes, et doivent indiquer les fichiers et sections de code concernés.
+Exemple d'instruction: "Dans app/dex_bot.py, méthode _gather_ai_agent_inputs, assure-toi que l'output du StrategySelector pour la stratégie 'XYZ' est inclus sous la clé signal_sources avec le format {'source_name': 'StrategyXYZ', 'signal': ..., 'confidence': ..., 'indicators': {...}}."
+Création d'un Plan d'Action (TODO.md) Stratégique, Révisé et Cohérent :
+
+Sur la base de ton analyse complète, propose une version révisée et consolidée du plan d'action global du projet sous forme d'un unique fichier TODO.md.
+Ce plan doit être :
+Priorisé (Absolue, Haute, Moyenne, Basse) pour atteindre rapidement un MVP robuste puis l'enrichir.
+Structuré par grandes phases ou modules fonctionnels.
+Clair et Actionnable : Chaque tâche doit être compréhensible et indiquer le résultat attendu.
+Cohérent avec l'architecture cible centrée sur l'AIAgent (interne à NumerusX).
+Complet : Intégrer les tâches pertinentes des TODOs existants, en éliminant les redondances ou les tâches obsolètes.
+Le plan doit guider mon IA d'IDE vers la réalisation de "l'application parfaite", en mettant l'accent sur la fiabilité, la performance, et l'intelligence décisionnelle.
+
+Il doit notamment inclure des tâches pour :
+Finaliser et stabiliser le cœur du DexBot et le flux de données vers l'AIAgent.
+Assurer la robustesse des interactions avec les API externes (Jupiter, Gemini).
+Compléter les endpoints API FastAPI et la logique Socket.io pour l'UI React.
+Définir les étapes pour l'amélioration continue de l'AIAgent (ex: évaluation des prompts, gestion des erreurs).
+Objectif Final :
+Que tu me fournisses une analyse experte de l'état actuel de NumerusX et une feuille de route claire (via les instructions pour l'IA d'IDE et le nouveau TODO.md) pour l'amener à un niveau de qualité et de fonctionnalité optimal, en respectant la vision architecturale d'un système de trading intelligent et performant sur Solana.
+
+Merci de m'aider à structurer et perfectionner NumerusX !

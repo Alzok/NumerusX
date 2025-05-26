@@ -330,15 +330,19 @@ Cette phase vise à enrichir l'expérience utilisateur et à introduire des capa
 - [ ] **Tâche**: ~~Intégrer une étape finale de validation par une IA rapide avant l'exécution d'un trade.~~
 - [ ] **Détails**: L'Agent IA est maintenant le décideur central. Ce concept est fusionné dans la logique de l'`
 
-## Points d'Attention / Risques / Ambiguïtés (01-todo-core.md)
+## Points d'Attention / Risques / Ambiguïtés (01-todo-core.md - Étendu avec Revue Stratégique)
 
-* **Gestion Clé Privée (JupiterApiClient/TradingEngine)**: Assurer que l'utilisation de `SOLANA_PRIVATE_KEY_BS58` pour `MarketDataProvider` (si lecture seule possible pour certaines opérations) est justifiée, bien que l'usage pour les cotations et trades soit normal.
+* **Gestion Clé Privée (JupiterApiClient/TradingEngine)**: Assurer que l'utilisation de `SOLANA_PRIVATE_KEY_BS58` est sécurisée et justifiée.
 * **Consistance Gestion Erreurs (Tâche 1.5)**: La distinction entre exceptions custom de `JupiterApiClient` et le format de retour `{'success': False, ...}` de `MarketDataProvider` doit être rigoureuse.
 * **Logique de Réessai `TradingEngine` (Tâche 1.6)**: S'assurer que les conditions de réessai pour `TransactionExpiredError` sont correctes et que l'état du système (validité du quote) est bien géré.
-* **Tests Unitaires Avancés `JupiterApiClient` (Tâche 1.9)**: Confirmer l'existence des méthodes SDK correspondantes pour les types d'ordres avancés (trigger, DCA) avant d'écrire les tests.
+* **Tests Unitaires Avancés `JupiterApiClient` (Tâche 1.9)**: Confirmer l'existence des méthodes SDK correspondantes pour les types d'ordres avancés (trigger, DCA) avant d'écrire les tests. Affiner les tests pour l'initialisation du SDK avec des URLs d'API spécifiques.
 * **Dépendances SDK**: S'assurer que l'implémentation de `JupiterApiClient` est alignée avec la version `jupiter-python-sdk>=0.24.0`.
+* **Initialisation `MarketDataProvider` dans `TradingEngine`**: Clarifier et standardiser l'injection de dépendance (Instruction 8 de la Revue Stratégique).
+* **Authentification et API Backend (Phase 1.bis / Tâche 1.10)**: Standardisation nécessaire entre les mécanismes d'authentification (`app.security.security` vs. `app.utils.auth`) et consolidation des points d'entrée API (`app.main.py` vs. `app.api_routes.py`) (Instructions 1 & 2 de la Revue Stratégique).
+* **Standardisation du Logging**: Migrer vers `logging.getLogger(__name__)` et supprimer `DexLogger` (Instruction 9 de la Revue Stratégique).
+* **Validation des Données en BD**: Implémenter la validation Pydantic pour `EnhancedDatabase.record_trade` (Instruction 10 de la Revue Stratégique).
 
-## Suggestions (01-todo-core.md)
+## Suggestions (01-todo-core.md - Étendu avec Revue Stratégique)
 
 * **Clarification `TradingEngine.execute_swap` (Tâche 1.6)**: Préciser la priorité ou la méthode de calcul si `amount_in_tokens_float` et `amount_in_usd` sont potentiellement fournis ensemble.
 * **Tests `JupiterApiClient` (Tâche 1.9)**: Simuler diverses conditions d'erreur SDK (pas seulement les appels directs) pour vérifier la gestion des exceptions custom et les mécanismes de réessai.
