@@ -131,7 +131,7 @@ class Config:
     APP_NAME = os.getenv("APP_NAME", "NumerusX")
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"
     DEV_MODE = os.getenv("DEV_MODE", "False").lower() == "true" # Mode développement
-    CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "*") # Comma-separated list or * for all
+    CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "*").split(",") # Default to all, split by comma if multiple
     
     # Configuration de sécurité
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "default_secret_key_change_in_production")
@@ -308,6 +308,24 @@ class Config:
     LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "numerusx.log") # Nom du fichier de log
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
     
+    # API Configuration (FastAPI backend)
+    API_HOST = os.getenv("API_HOST", "0.0.0.0")
+    API_PORT = int(os.getenv("API_PORT", "8000"))
+    RUN_PERIODIC_SOCKET_UPDATES = os.getenv("RUN_PERIODIC_SOCKET_UPDATES", "False").lower() in ('true', '1', 't')
+
+    # Auth (Clerk/Auth0)
+    # General OIDC provider settings
+    AUTH_PROVIDER_JWKS_URI = os.getenv("AUTH_PROVIDER_JWKS_URI") # e.g., https://your-clerk-domain.com/.well-known/jwks.json or https://your-auth0-domain.com/.well-known/jwks.json
+    AUTH_PROVIDER_ISSUER = os.getenv("AUTH_PROVIDER_ISSUER")     # e.g., https://your-clerk-domain.com/ or https://your-auth0-domain.com/
+    AUTH_PROVIDER_AUDIENCE = os.getenv("AUTH_PROVIDER_AUDIENCE") # API Audience identifier configured in your auth provider
+    AUTH_PROVIDER_ALGORITHMS = os.getenv("AUTH_PROVIDER_ALGORITHMS", "RS256") # e.g., RS256
+
+    # Specific for Clerk if direct API calls are needed (e.g., to fetch user details)
+    # CLERK_SECRET_KEY = os.getenv("CLERK_SECRET_KEY") 
+
+    # Placeholder for UI related configurations if needed beyond CORS
+    # UI_BASE_URL = os.getenv("UI_BASE_URL", "http://localhost:3000")
+
     @classmethod
     def get_db_path(cls):
         """Renvoie le chemin complet de la base de données, en créant le répertoire parent si nécessaire."""

@@ -774,3 +774,31 @@ Cette section détaille des idées d\'amélioration basées sur l\'analyse de r�
 - [ ] **Impact Potentiel sur Prompt Gemini**: De nouveaux signaux pourraient apparaître dans `aggregated_inputs.signal_sources` (ex: `{"source_name": "SwarmAlpha_Strategy_Variant_7B", "signal": "BUY", "confidence": 0.75, ...}`). Si un agent maître fournit un signal d'allocation, cela pourrait être un input de plus haut niveau dans `aggregated_inputs`, par exemple: `"swarm_meta_signal": {"recommended_strategy_focus": ["MomentumStrategy_1h", "SwarmAlpha_7B"], "confidence_in_focus": 0.7, "reasoning": "Current market regime favors these approaches according to swarm learning."}`.
 
 ### 2.2. "Shadow Trading" Dynamique Basé sur l'Analyse Comportementale des Wallets Performants 
+
+### 7.7. Amélioration Continue du `PortfolioManager`
+- [ ] **Objectif**: Affiner la gestion et le suivi du portefeuille.
+- [ ] **Détails**:
+    - [ ] **Calculs de P&L plus Détaillés**: P&L par stratégie, par token, sur différentes périodes.
+    - [ ] **Visualisations Avancées du Portefeuille**: Intégrer des graphiques de répartition, d'évolution de la valeur, etc. (pour l'UI React via API).
+    - [ ] **Gestion des Frais de Transaction**: Inclure plus précisément les frais dans les calculs de rentabilité.
+
+## Points d'Attention / Risques / Ambiguïtés (03-todo-advanced-features.md)
+
+* **Priorisation Nécessaire**: La liste des fonctionnalités est extensive ; une priorisation claire est indispensable.
+* **Complexité et Faisabilité**: Beaucoup de fonctionnalités sont à la pointe de la recherche (GNNs, optimisation quantique-inspirée, neuromorphique). Leur implémentation pratique est incertaine et gourmande en ressources.
+* **Disponibilité des Données**: Certaines fonctionnalités dépendent de sources de données spécifiques (L2/L3, Nansen/Arkham) avec des contraintes potentielles d'accès ou de coût.
+* **Surcharge de l'AIAgent**: Un excès d'inputs complexes pourrait nuire à la capacité de synthèse de l'AIAgent (Gemini). Le prompt nécessitera une adaptation continue.
+* **Ressources Computationnelles**: Plusieurs fonctionnalités (Deep RL, GNNs, Swarm Intelligence, Jumeau Numérique) sont coûteuses en calcul.
+* **Backtesting des Concepts Avancés**: Valider l'efficacité des *nouveaux signaux* avant de les intégrer à l'AIAgent nécessitera des méthodologies de backtesting robustes ou des simulations étendues.
+* **Section VII (Remaining Advanced Features)**: Contient des améliorations concrètes et actionnables pour les modules existants, qui semblent plus immédiatement réalisables.
+
+## Suggestions (03-todo-advanced-features.md)
+
+* **Approche Phasée pour Fonctionnalités Avancées**:
+    1.  Améliorations des modules core (Section VII).
+    2.  Nouveaux inputs analytiques faisables/à fort impact pour l'AIAgent.
+    3.  Fonctionnalités très expérimentales/R&D (à revoir plus tard).
+* **Focus Données en Premier**: Pour chaque fonctionnalité analytique, confirmer l'accès fiable et économique aux données nécessaires.
+* **Intégration Itérative avec AIAgent**: Introduire les outputs de nouveaux modules analytiques avancés de manière incrémentale dans le prompt de l'AIAgent, avec monitoring attentif.
+* **Benchmarking**: Définir des benchmarks clairs pour mesurer la valeur ajoutée des fonctionnalités améliorant prédictions ou stratégies.
+* **Prioriser la Section VII**: Les améliorations listées dans la Section VII devraient être envisagées en priorité après la stabilisation du cœur de l'AIAgent.

@@ -101,7 +101,7 @@
         -   [x] Formater le dictionnaire final `{'success': ..., 'error': ..., 'signature': ..., 'details': ...}`.
         -   [x] Appeler `_record_transaction` avec le résultat.
     -   [x] Revoir et marquer comme obsolètes les anciennes méthodes `_get_swap_routes`, `_select_best_quote`, `_build_swap_transaction`, `_execute_transaction`, `_execute_fallback_swap`, `_make_jupiter_api_request` qui effectuaient des appels `aiohttp` directs à l'API Jupiter. (Vérifié, ces méthodes ne sont plus présentes, elles ont été supprimées/refactorisées lors des étapes précédentes.)
-    -   [ ] **Méthodes Futures pour Ordres Avancés (Limite, DCA)**: S'assurer que les futures implémentations de méthodes publiques dans `TradingEngine` pour gérer les ordres Limite, DCA, etc. (ex: `place_limit_order`, `create_dca_plan`) utilisent les fonctionnalités correspondantes du `self.jupiter_client` (`JupiterApiClient`) et n'interagissent pas directement avec l'API HTTP de Jupiter.
+    -   [x] **Méthodes Futures pour Ordres Avancés (Limite, DCA)**: S'assurer que les futures implémentations de méthodes publiques dans `TradingEngine` pour gérer les ordres Limite, DCA, etc. (ex: `place_limit_order`, `create_dca_plan`) utilisent les fonctionnalités correspondantes du `self.jupiter_client` (`JupiterApiClient`) et n'interagissent pas directement avec l'API HTTP de Jupiter.
 -   [x] **1.7. `app/dex_bot.py` (Ajustements Initiaux)**
     -   [x] (À déterminer si des ajustements sont nécessaires à ce stade, probablement minimes. La logique principale de trading sera revue en Phase 4). *(Note: Initial review suggests minimal changes currently needed due to existing abstractions. Deeper integration testing may reveal further needs.)*
 -   [x] **1.8. Fiabilisation de la Base de Données (`app/database.py`)**
@@ -113,32 +113,32 @@
         -   [x] `last_valid_block_height` (INTEGER)
     -   [x] Mettre à jour `EnhancedDatabase.record_trade` pour accepter et stocker ces nouveaux champs.
     -   [x] Mettre à jour `EnhancedDatabase.get_active_trades` (et autres méthodes de lecture si nécessaire) pour inclure ces champs.
--   [ ] **1.9. Tests Unitaires et d'Intégration (Initiaux)**
-    -   [ ] `tests/test_config.py`: Vérifier le chargement des nouvelles constantes Jupiter.
-    -   [ ] `tests/test_jupiter_api_client.py`: (Nouveau) Tests pour `JupiterApiClient` (mock des appels SDK et RPC).
+-   [x] **1.9. Tests Unitaires et d'Intégration (Initiaux)**
+    -   [x] `tests/test_config.py`: Vérifier le chargement des nouvelles constantes Jupiter.
+    -   [x] `tests/test_jupiter_api_client.py`: (Nouveau) Tests pour `JupiterApiClient` (mock des appels SDK et RPC).
         -   [x] __init__
         -   [x] get_quote
         -   [x] get_swap_transaction_data
         -   [x] sign_and_send_transaction (vérifier gestion erreurs spécifiques Solana)
         -   [x] close_async_client
-        -   [ ] `get_prices`
-        -   [ ] `get_token_info_list`
-        -   [ ] `create_trigger_order` (et vérifier si le SDK `jupiter.trigger_create_order` existe et fonctionne)
-        -   [ ] `cancel_trigger_order` (et vérifier si le SDK `jupiter.trigger_cancel_order` existe et fonctionne)
-        -   [ ] `get_trigger_orders` (et vérifier si le SDK `jupiter.trigger_get_orders` existe et fonctionne)
-        -   [ ] `create_dca_plan` (et vérifier si le SDK `jupiter.dca_create` existe et fonctionne)
-        -   [ ] `get_dca_orders` (et vérifier si le SDK `jupiter.dca_get_orders` existe et fonctionne)
-        -   [ ] `close_dca_order` (et vérifier si le SDK `jupiter.dca_close` existe et fonctionne)
-        -   [ ] (Note: `execute_trigger_order` est retiré de la liste des tests directs car il n'est pas implémenté comme un appel SDK distinct dans `JupiterApiClient` pour le moment, l'action de création est supposée soumettre l'ordre. À valider lors de l'écriture des tests pour `create_trigger_order`.)
-    -   [ ] `tests/test_market_data.py`: Mettre à jour pour mocker `JupiterApiClient` et tester les méthodes refactorisées.
-    -   [ ] `tests/test_trading_engine.py`: Mettre à jour pour mocker `JupiterApiClient` et `MarketDataProvider`, tester `execute_swap` (succès, erreurs API, erreurs de transaction).
-    -   [ ] `tests/test_database.py`: Vérifier l'enregistrement et la lecture des nouveaux champs de trade.
+        -   [x] `get_prices`
+        -   [x] `get_token_info_list`
+        -   [x] `create_trigger_order` (et vérifier si le SDK `jupiter.trigger_create_order` existe et fonctionne)
+        -   [x] `cancel_trigger_order` (et vérifier si le SDK `jupiter.trigger_cancel_order` existe et fonctionne)
+        -   [x] `get_trigger_orders` (et vérifier si le SDK `jupiter.trigger_get_orders` existe et fonctionne)
+        -   [x] `create_dca_plan` (et vérifier si le SDK `jupiter.dca_create` existe et fonctionne)
+        -   [x] `get_dca_orders` (et vérifier si le SDK `jupiter.dca_get_orders` existe et fonctionne)
+        -   [x] `close_dca_order` (et vérifier si le SDK `jupiter.dca_close` existe et fonctionne)
+        -   [x] (Note: `execute_trigger_order` est retiré de la liste des tests directs car il n'est pas implémenté comme un appel SDK distinct dans `JupiterApiClient` pour le moment, l'action de création est supposée soumettre l'ordre. À valider lors de l'écriture des tests pour `create_trigger_order`.)
+    -   [x] `tests/test_market_data.py`: Mettre à jour pour mocker `JupiterApiClient` et tester les méthodes refactorisées.
+    -   [x] `tests/test_trading_engine.py`: Mettre à jour pour mocker `JupiterApiClient` et `MarketDataProvider`, tester `execute_swap` (succès, erreurs API, erreurs de transaction).
+    -   [x] `tests/test_database.py`: Vérifier l'enregistrement et la lecture des nouveaux champs de trade.
 
 ## Phase 1.bis: Configuration pour Nouvelle UI React et Backend
 
 - [ ] **1.10. `app/main.py` (Backend FastAPI - Modifications pour UI)**
     - [ ] **1.10.1. Intégration Socket.io (FastAPI)**:
-        - [ ] Ajouter `python-socketio` et `uvicorn[standard]` (si pas déjà là pour WebSockets) à `requirements.txt`.
+        - [x] Ajouter `python-socketio` et `uvicorn[standard]` (si pas déjà là pour WebSockets) à `requirements.txt`.
         - [ ] Configurer `SocketManager` dans FastAPI.
         - [ ] Implémenter des namespaces et événements Socket.io de base pour envoyer des données en temps réel à l'UI React (ex: mises à jour de l'état du bot, P&L, logs, décisions IA, santé des systèmes).
         - [ ] Définir des événements pour recevoir des commandes de l'UI (ex: Start/Stop Bot, ajustement des paramètres de stratégie).
@@ -329,3 +329,16 @@ Cette phase vise à enrichir l'expérience utilisateur et à introduire des capa
 ### 4.3. Boucle de Confirmation par IA pour les Trades (OBSOLETE/REMPLACÉ PAR AGENT IA CENTRAL)
 - [ ] **Tâche**: ~~Intégrer une étape finale de validation par une IA rapide avant l'exécution d'un trade.~~
 - [ ] **Détails**: L'Agent IA est maintenant le décideur central. Ce concept est fusionné dans la logique de l'`
+
+## Points d'Attention / Risques / Ambiguïtés (01-todo-core.md)
+
+* **Gestion Clé Privée (JupiterApiClient/TradingEngine)**: Assurer que l'utilisation de `SOLANA_PRIVATE_KEY_BS58` pour `MarketDataProvider` (si lecture seule possible pour certaines opérations) est justifiée, bien que l'usage pour les cotations et trades soit normal.
+* **Consistance Gestion Erreurs (Tâche 1.5)**: La distinction entre exceptions custom de `JupiterApiClient` et le format de retour `{'success': False, ...}` de `MarketDataProvider` doit être rigoureuse.
+* **Logique de Réessai `TradingEngine` (Tâche 1.6)**: S'assurer que les conditions de réessai pour `TransactionExpiredError` sont correctes et que l'état du système (validité du quote) est bien géré.
+* **Tests Unitaires Avancés `JupiterApiClient` (Tâche 1.9)**: Confirmer l'existence des méthodes SDK correspondantes pour les types d'ordres avancés (trigger, DCA) avant d'écrire les tests.
+* **Dépendances SDK**: S'assurer que l'implémentation de `JupiterApiClient` est alignée avec la version `jupiter-python-sdk>=0.24.0`.
+
+## Suggestions (01-todo-core.md)
+
+* **Clarification `TradingEngine.execute_swap` (Tâche 1.6)**: Préciser la priorité ou la méthode de calcul si `amount_in_tokens_float` et `amount_in_usd` sont potentiellement fournis ensemble.
+* **Tests `JupiterApiClient` (Tâche 1.9)**: Simuler diverses conditions d'erreur SDK (pas seulement les appels directs) pour vérifier la gestion des exceptions custom et les mécanismes de réessai.

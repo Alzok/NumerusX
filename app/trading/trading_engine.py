@@ -24,7 +24,7 @@ from app.utils.jupiter_api_client import JupiterApiClient
 from app.utils.exceptions import (
     JupiterAPIError, SolanaTransactionError, TransactionExpiredError, 
     TransactionSimulationError, TransactionBroadcastError, TransactionConfirmationError,
-    NumerusXBaseError
+    NumerusXBaseError, TradingError
 )
 
 # Configuration du logging
@@ -32,8 +32,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger("trading_engine")
 
 class TradingEngine:
-    """Moteur de trading optimisé pour exécuter des opérations sur les DEX Solana."""
-    
+    """
+    Handles low-level trade execution via Jupiter, including swaps, limit orders, and DCA.
+    It uses JupiterApiClient for all interactions with the Jupiter SDK and Solana blockchain.
+    """
     def __init__(self, wallet_path: str, rpc_url: Optional[str] = None):
         """
         Initialise le moteur de trading.
@@ -356,170 +358,176 @@ class TradingEngine:
             return {'success': False, 'error': f"Error estimating fee: {str(e)}", 'data': None}
             
     async def execute_swap(
-        self, 
-        input_token_mint: str, 
-        output_token_mint: str, 
-        amount_in_usd: Optional[float] = None, 
-        amount_in_tokens_float: Optional[float] = None, 
-        slippage_bps: Optional[int] = None
+        self,
+        input_token_mint_str: str,
+        output_token_mint_str: str,
+        amount_in_tokens_float: Optional[float] = None,
+        amount_in_usd: Optional[float] = None,
+        slippage_bps: Optional[int] = None,
+        swap_mode: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Exécute un swap en utilisant JupiterApiClient via MarketDataProvider et JupiterApiClient directement.
-        Gère la conversion USD -> tokens si nécessaire, obtient la quote, récupère les données de transaction,
-        signe et envoie la transaction. Inclut la logique de retry pour TransactionExpiredError.
+        Executes a token swap.
+        Either amount_in_tokens_float (for input token) or amount_in_usd must be provided.
+        Returns a dictionary: {'success': bool, 'error': str, 'signature': str, 'details': dict}
+        'details' will contain quote_response and last_valid_block_height on success.
         """
-        start_time = time.time()
-        self.last_transaction_signature = None # Reset before new attempt
+        if not (amount_in_tokens_float or amount_in_usd):
+            return {'success': False, 'error': "Either amount_in_tokens_float or amount_in_usd must be provided.", 'signature': None, 'details': None}
+        if amount_in_tokens_float and amount_in_usd:
+            return {'success': False, 'error': "Provide either amount_in_tokens_float or amount_in_usd, not both.", 'signature': None, 'details': None}
 
-        if not self.market_data_provider:
-            logger.error("MarketDataProvider not initialized in TradingEngine for execute_swap.")
-            return {"success": False, "error": "MarketDataProvider not initialized", "signature": None, "details": None}
-        if not self.jupiter_client:
-            logger.error("JupiterApiClient not initialized in TradingEngine for execute_swap.")
-            return {"success": False, "error": "JupiterApiClient not initialized", "signature": None, "details": None}
+        final_slippage_bps = slippage_bps if slippage_bps is not None else self.config.JUPITER_DEFAULT_SLIPPAGE_BPS
+        final_swap_mode = swap_mode if swap_mode is not None else self.config.JUPITER_SWAP_MODE
 
-        actual_slippage_bps = slippage_bps if slippage_bps is not None else self.config.JUPITER_DEFAULT_SLIPPAGE_BPS
-
-        # Validate and determine amount_in_tokens_float
-        if amount_in_tokens_float is None and amount_in_usd is not None:
-            logger.info(f"Amount in USD provided: {amount_in_usd}. Converting to token amount for {input_token_mint}.")
-            price_response = await self.market_data_provider.get_token_price(input_token_mint)
-            if not price_response.get("success") or not price_response.get("data") or not price_response["data"].get("price"):
-                error_msg = f"Failed to get price for input token {input_token_mint} to convert USD amount: {price_response.get('error')}"
-                logger.error(error_msg)
-                return {"success": False, "error": error_msg, "signature": None, "details": None}
-            token_price_usd = price_response["data"]["price"]
-            if token_price_usd <= 0:
-                error_msg = f"Invalid price ({token_price_usd}) for input token {input_token_mint}. Cannot convert USD amount."
-                logger.error(error_msg)
-                return {"success": False, "error": error_msg, "signature": None, "details": None}
-            amount_in_tokens_float = amount_in_usd / token_price_usd
-            logger.info(f"Converted {amount_in_usd} USD to {amount_in_tokens_float} of {input_token_mint} at price {token_price_usd} USD.")
-        elif amount_in_tokens_float is None and amount_in_usd is None:
-            error_msg = "Either amount_in_usd or amount_in_tokens_float must be provided for execute_swap."
-            logger.error(error_msg)
-            return {"success": False, "error": error_msg, "signature": None, "details": None}
-        elif amount_in_tokens_float is not None:
-            logger.info(f"Amount in tokens provided: {amount_in_tokens_float} {input_token_mint}")
-        # If both are provided, amount_in_tokens_float takes precedence as per original logic, though this should be clarified.
-
-        if amount_in_tokens_float <= 0:
-            error_msg = f"Amount to swap must be positive. Provided: {amount_in_tokens_float} {input_token_mint}"
-            logger.error(error_msg)
-            return {"success": False, "error": error_msg, "signature": None, "details": None}
+        amount_lamports: Optional[int] = None
 
         try:
-            tx_signature = await self._execute_swap_attempt(
-                input_token_mint=input_token_mint,
-                output_token_mint=output_token_mint,
-                amount_in_tokens_float=amount_in_tokens_float,
-                slippage_bps=actual_slippage_bps
+            market_data_provider = await self._get_market_data_provider()
+
+            if amount_in_usd:
+                if input_token_mint_str == self.config.USDC_MINT_ADDRESS: # Assuming USDC is the "USD" token
+                    # If input is USDC, we need its decimals (usually 6 for USDC)
+                    token_info_response = await market_data_provider.get_token_info(input_token_mint_str)
+                    if not token_info_response['success'] or not token_info_response['data']:
+                        raise TradingError(f"Failed to get token info for input USDC {input_token_mint_str}: {token_info_response.get('error')}")
+                    decimals = token_info_response['data']['decimals']
+                    amount_lamports = int(amount_in_usd * (10**decimals))
+                else:
+                    # If input is another token, convert USD value to token amount, then to lamports
+                    price_response = await market_data_provider.get_token_price(input_token_mint_str, self.config.USDC_MINT_ADDRESS)
+                    if not price_response['success'] or not price_response['data'] or price_response['data']['price'] == 0:
+                        raise TradingError(f"Failed to get price for input token {input_token_mint_str} to calculate amount from USD: {price_response.get('error')}")
+                    
+                    token_price_usd = price_response['data']['price']
+                    calculated_amount_tokens = amount_in_usd / token_price_usd
+                    
+                    token_info_response = await market_data_provider.get_token_info(input_token_mint_str)
+                    if not token_info_response['success'] or not token_info_response['data']:
+                         raise TradingError(f"Failed to get token info for input {input_token_mint_str}: {token_info_response.get('error')}")
+                    decimals = token_info_response['data']['decimals']
+                    amount_lamports = int(calculated_amount_tokens * (10**decimals))
+            
+            elif amount_in_tokens_float:
+                token_info_response = await market_data_provider.get_token_info(input_token_mint_str)
+                if not token_info_response['success'] or not token_info_response['data']:
+                    raise TradingError(f"Failed to get token info for input {input_token_mint_str}: {token_info_response.get('error')}")
+                decimals = token_info_response['data']['decimals']
+                amount_lamports = int(amount_in_tokens_float * (10**decimals))
+
+            if amount_lamports is None or amount_lamports <= 0:
+                raise TradingError(f"Calculated amount_lamports is invalid: {amount_lamports}")
+
+            logger.info(f"Executing swap: {amount_lamports} lamports of {input_token_mint_str} for {output_token_mint_str}")
+            
+            swap_result = await self._execute_swap_attempt(
+                input_token_mint_str=input_token_mint_str,
+                output_token_mint_str=output_token_mint_str,
+                amount_lamports=amount_lamports,
+                slippage_bps=final_slippage_bps,
+                swap_mode=final_swap_mode
             )
-            self.last_transaction_signature = tx_signature
-            duration = time.time() - start_time
-            logger.info(f"Swap successful for {input_token_mint} -> {output_token_mint}. Signature: {tx_signature}. Duration: {duration:.2f}s")
-            result = {
-                "success": True, 
-                "signature": tx_signature, 
-                "error": None, 
-                "duration_seconds": duration,
-                "details": {
-                    "input_token": input_token_mint,
-                    "output_token": output_token_mint,
-                    "amount_swapped_tokens": amount_in_tokens_float,
-                    # More details can be added here from quote_data if needed
+            
+            return {
+                'success': True, 
+                'signature': swap_result["signature"],
+                'error': None,
+                'details': {
+                    # Convert SDK objects to dicts if they are not already serializable by default
+                    # Assuming quote_response and transaction_data are dict-like or have simple structures.
+                    # If they are complex Pydantic models from SDK, may need .model_dump() or similar.
+                    'quote_response': swap_result["quote_response"], 
+                    'transaction_data': swap_result["transaction_data"],
+                    'last_valid_block_height': swap_result["last_valid_block_height"],
+                    'input_token_mint': input_token_mint_str,
+                    'output_token_mint': output_token_mint_str,
+                    'amount_lamports_swapped': amount_lamports,
+                    'slippage_bps_used': final_slippage_bps
                 }
             }
+
         except TransactionExpiredError as e:
-            # This is after retries by _execute_swap_attempt have failed.
-            duration = time.time() - start_time
-            logger.error(f"Swap failed after retries due to TransactionExpiredError: {e}. Duration: {duration:.2f}s", exc_info=True)
-            result = {"success": False, "error": f"Swap failed: Transaction expired after retries - {e}", "signature": e.signature, "duration_seconds": duration, "details": e}
-        except JupiterAPIError as e:
-            duration = time.time() - start_time
-            logger.error(f"Swap failed due to JupiterAPIError: {e}. Duration: {duration:.2f}s", exc_info=True)
-            result = {"success": False, "error": f"Swap failed: Jupiter API Error - {e}", "signature": None, "duration_seconds": duration, "details": e}
-        except SolanaTransactionError as e: # Covers Simulation, Broadcast, Confirmation errors
-            duration = time.time() - start_time
-            logger.error(f"Swap failed due to SolanaTransactionError: {e}. Duration: {duration:.2f}s", exc_info=True)
-            result = {"success": False, "error": f"Swap failed: Solana Transaction Error - {e}", "signature": e.signature, "duration_seconds": duration, "details": e}
-        except NumerusXBaseError as e: # Catch other app-specific errors
-            duration = time.time() - start_time
-            logger.error(f"Swap failed due to NumerusXBaseError: {e}. Duration: {duration:.2f}s", exc_info=True)
-            result = {"success": False, "error": f"Swap failed: Application Error - {e}", "signature": None, "duration_seconds": duration, "details": e}
+            logger.error(f"Swap failed after retries due to TransactionExpiredError: {e}", exc_info=True)
+            return {'success': False, 'error': f"Transaction expired after retries: {e}", 'signature': None, 'details': {'original_exception': str(e)}}
+        except (JupiterAPIError, SolanaTransactionError, TradingError, NumerusXBaseError) as e:
+            logger.error(f"Swap execution failed: {e}", exc_info=True)
+            return {'success': False, 'error': str(e), 'signature': None, 'details': {'original_exception': str(e)}}
         except Exception as e:
-            duration = time.time() - start_time
-            logger.critical(f"Unexpected critical error during swap: {e}. Duration: {duration:.2f}s", exc_info=True)
-            result = {"success": False, "error": f"Swap failed: Unexpected critical error - {e}", "signature": None, "duration_seconds": duration, "details": None}
+            logger.critical(f"Unexpected error during swap execution: {e}", exc_info=True)
+            return {'success': False, 'error': f"Unexpected error: {e}", 'signature': None, 'details': {'original_exception': str(e)}}
 
-        self._record_transaction(result, {
-            "input_token_mint": input_token_mint,
-            "output_token_mint": output_token_mint,
-            "amount_in_tokens_float": amount_in_tokens_float,
-            "slippage_bps": actual_slippage_bps,
-            "attempted_amount_usd": amount_in_usd
-        })
-        return result
+    async def _get_market_data_provider(self) -> MarketDataProvider:
+        if self.market_data_provider is None:
+            self.market_data_provider = MarketDataProvider(
+                config=self.config,
+                jupiter_client=self.jupiter_client # Share the client if MDP needs it
+            )
+            # Enter context if MDP supports it (assuming it does for session management)
+            # This part might need adjustment based on MDP's __aenter__ signature
+            # For now, assuming it's okay to call directly or that __aenter__ is simple.
+            await self.market_data_provider.__aenter__() 
+        return self.market_data_provider
 
-    # Add tenacity retry for TransactionExpiredError around the core swap logic
     @retry(
-        retry=retry_if_exception_type(TransactionExpiredError),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
         stop=stop_after_attempt(Config.JUPITER_MAX_RETRIES if hasattr(Config, 'JUPITER_MAX_RETRIES') else 3),
-        reraise=True # Reraise TransactionExpiredError if all retries fail, to be caught by outer layer if needed
+        wait=wait_exponential(multiplier=1, min=1, max=5),
+        retry=retry_if_exception_type(TransactionExpiredError),
+        reraise=True # Reraise the exception if all retries fail
     )
     async def _execute_swap_attempt(
-        self, 
-        input_token_mint: str, 
-        output_token_mint: str, 
-        amount_in_tokens_float: float,
-        slippage_bps: int
-    ) -> str: # Returns transaction signature on success
-        """One attempt to perform the full quote -> get_tx_data -> sign_and_send flow."""
-        if not self.market_data_provider:
-            logger.error("MarketDataProvider not initialized in TradingEngine.")
-            raise RuntimeError("MarketDataProvider not initialized") # Or return error dict if preferred by execute_swap
-        if not self.jupiter_client:
-            logger.error("JupiterApiClient not initialized in TradingEngine.")
-            raise RuntimeError("JupiterApiClient not initialized")
-
-        # 1. Get quote from MarketDataProvider (which uses JupiterApiClient)
-        logger.info(f"Attempting to get swap quote: {amount_in_tokens_float} {input_token_mint} -> {output_token_mint}")
-        quote_response_dict = await self.market_data_provider.get_jupiter_swap_quote(
-            input_mint_str=input_token_mint,
-            output_mint_str=output_token_mint,
-            amount_in_tokens=amount_in_tokens_float,
-            slippage_bps=slippage_bps
+        self,
+        input_token_mint_str: str,
+        output_token_mint_str: str,
+        amount_lamports: int,
+        slippage_bps: int,
+        swap_mode: str
+    ) -> Dict[str, Any]:
+        """
+        Internal method to perform a single swap attempt.
+        This method is decorated with tenacity.retry to handle TransactionExpiredError.
+        Returns a dictionary with quote_response, transaction_data, and signature on success.
+        Raises JupiterAPIError or SolanaTransactionError on failure.
+        """
+        logger.info(f"Attempting swap: {amount_lamports} lamports of {input_token_mint_str} for {output_token_mint_str}, slippage: {slippage_bps}bps, mode: {swap_mode}")
+        
+        # 1. Get Quote
+        # Parameters for get_quote are passed directly.
+        quote_response_dict = await self.jupiter_client.get_quote(
+            input_mint_str=input_token_mint_str,
+            output_mint_str=output_token_mint_str,
+            amount_lamports=amount_lamports,
+            slippage_bps=slippage_bps,
+            swap_mode=swap_mode
+            # Other params like compute_unit_price_micro_lamports, etc., are handled by JupiterApiClient using Config defaults
         )
+        # JupiterApiClient.get_quote now returns the direct SDK response object, not a dict with 'success'.
+        # We assume if no exception, it was successful. The response object is what we need.
+        logger.debug(f"Quote received: {quote_response_dict}")
 
-        if not quote_response_dict.get("success") or not quote_response_dict.get("data"):
-            error_msg = f"Failed to get swap quote: {quote_response_dict.get('error', 'No quote data returned')}"
-            logger.error(error_msg)
-            # Decide if this should raise a specific error or be handled by the caller execute_swap to return a dict
-            raise JupiterAPIError(message=error_msg) # Propagate as JupiterAPIError to be caught by execute_swap
+        # 2. Get Swap Transaction Data
+        # Assuming quote_response_dict is the actual QuoteResponse object from the SDK
+        transaction_data_dict = await self.jupiter_client.get_swap_transaction_data(
+            quote_response=quote_response_dict 
+            # payer_public_key is handled by jupiter_client
+        )
+        logger.debug(f"Swap transaction data obtained: {transaction_data_dict}")
         
-        quote_data_from_sdk = quote_response_dict["data"] # This is the raw quote response from SDK
-        logger.info(f"Successfully obtained swap quote. Out amount: {quote_data_from_sdk.get('outAmount')} lamports.")
+        serialized_transaction_b64 = transaction_data_dict['swap_transaction'] # Key from SDK
+        last_valid_block_height = transaction_data_dict['last_valid_block_height']
 
-        # 2. Get swap transaction data from JupiterApiClient
-        logger.info("Fetching swap transaction data from JupiterApiClient...")
-        # get_swap_transaction_data expects the raw quote response object from the SDK's quote call.
-        swap_tx_data_dict = await self.jupiter_client.get_swap_transaction_data(quote_data_from_sdk)
-        
-        # get_swap_transaction_data now returns a dict {"serialized_transaction_b64": ..., "last_valid_block_height": ...} or raises
-        serialized_transaction_b64 = swap_tx_data_dict["serialized_transaction_b64"]
-        last_valid_block_height = swap_tx_data_dict["last_valid_block_height"]
-        logger.info(f"Successfully obtained swap transaction data. Last valid block height: {last_valid_block_height}")
-
-        # 3. Sign and send transaction using JupiterApiClient
-        logger.info("Signing and sending transaction...")
-        # sign_and_send_transaction now returns signature string or raises SolanaTransactionError subtypes
-        tx_signature_str = await self.jupiter_client.sign_and_send_transaction(
+        # 3. Sign and Send Transaction
+        signature = await self.jupiter_client.sign_and_send_transaction(
             serialized_transaction_b64=serialized_transaction_b64,
             last_valid_block_height=last_valid_block_height
         )
-        logger.info(f"Swap transaction successfully sent and confirmed. Signature: {tx_signature_str}")
-        return tx_signature_str
+        logger.info(f"Swap transaction sent successfully. Signature: {signature}")
+        
+        return {
+            "quote_response": quote_response_dict, # Keep the original quote response
+            "transaction_data": transaction_data_dict, # Keep original transaction data
+            "signature": signature,
+            "last_valid_block_height": last_valid_block_height
+        }
 
     def _record_transaction(self, result: Dict[str, Any], details: Dict[str, Any]) -> None:
         """Enregistre les détails d'une transaction dans l'historique."""
@@ -533,95 +541,132 @@ class TradingEngine:
         self.transaction_history.append(transaction_record)
         self.last_transaction_signature = result.get("signature")
 
-    # async def _get_api_session(self) -> aiohttp.ClientSession:
-    #     """Crée et retourne une session aiohttp."""
-    #     if self._api_session is None or self._api_session.closed:
-    #         self._api_session = aiohttp.ClientSession()
-    #     return self._api_session
-    #
-    # async def _close_api_session(self):
-    #     """Ferme la session aiohttp si elle est ouverte."""
-    #     if self._api_session and not self._api_session.closed:
-    #         await self._api_session.close()
-    #         logger.info("aiohttp session closed.")
-    #
-    # async def _make_jupiter_api_request(self, method: str, endpoint: str, params: Optional[Dict] = None, data: Optional[Dict] = None) -> Dict[str, Any]:
-    #     """
-    #     Effectue une requête HTTP à l'API Jupiter V6 en utilisant aiohttp.
-    #     DEPRECATED: Should use JupiterApiClient with the SDK.
-    #     Args:
-    #         method: Méthode HTTP (GET, POST).
-    #         endpoint: Le chemin de l'API (ex: /quote).
-    #         params: Dictionnaire de paramètres d'URL pour les requêtes GET.
-    #         data: Dictionnaire de données JSON pour les requêtes POST.
-    #
-    #     Returns:
-    #         La réponse JSON de l'API sous forme de dictionnaire.
-    #
-    #     Raises:
-    #         JupiterAPIError: Si la requête échoue ou retourne un statut d'erreur.
-    #     """
-    #     session = await self._get_api_session()
-    #     # Note: Config.JUPITER_API_BASE_URL_V6 should be the correct base for v6 direct calls if any were needed.
-    #     # However, JupiterApiClient handles URL construction now. This method is purely for legacy/direct aiohttp example.
-    #     # This method is marked as DEPRECATED.
-    #     base_url = self.config.JUPITER_API_BASE_URL_V6 # Example if it were used
-    #     if not base_url:
-    #         logger.error("JUPITER_API_BASE_URL_V6 not configured.")
-    #         raise JupiterAPIError("Jupiter API base URL not configured.", api_name="JupiterV6_Direct")
-    #     
-    #     url = f"{base_url}{endpoint}"
-    #     
-    #     headers = {"Accept": "application/json"}
-    #     if self.config.JUPITER_V6_API_KEY: # Example if a key was needed for direct calls
-    #         headers["Authorization"] = f"Bearer {self.config.JUPITER_V6_API_KEY}"
-    #
-    #     try:
-    #         logger.debug(f"Making {method} request to {url} with params={params}, data={data}")
-    #         async with session.request(method, url, params=params, json=data, headers=headers, timeout=self.config.JUPITER_REQUEST_TIMEOUT) as response:
-    #             response_text = await response.text() # Read text first for better error logging
-    #             logger.debug(f"Jupiter V6 API raw response ({response.status}): {response_text[:500]}") # Log snippet
-    #             if response.status == 200:
-    #                 try:
-    #                     return await response.json()
-    #                 except aiohttp.ContentTypeError:
-    #                     logger.error(f"Jupiter API V6 content type error. Response: {response_text}")
-    #                     raise JupiterAPIError(f"Invalid JSON response from Jupiter V6 API. Status: {response.status}. Response: {response_text[:200]}", status_code=response.status, api_name="JupiterV6_Direct")
-    #             else:
-    #                 logger.error(f"Jupiter API V6 request failed with status {response.status}: {response_text}")
-    #                 raise JupiterAPIError(f"Jupiter V6 API error. Status: {response.status}. Response: {response_text[:200]}", status_code=response.status, api_name="JupiterV6_Direct")
-    #     except aiohttp.ClientError as e: # Handles timeouts, connection errors etc.
-    #         logger.error(f"aiohttp client error during Jupiter V6 API request: {e}")
-    #         raise JupiterAPIError(f"Network or client error during Jupiter V6 API request: {e}", api_name="JupiterV6_Direct")
-    #     except asyncio.TimeoutError:
-    #         logger.error(f"Timeout during Jupiter V6 API request to {url}")
-    #         raise JupiterAPIError(f"Timeout during Jupiter V6 API request to {url}", api_name="JupiterV6_Direct")
-    #     except Exception as e:
-    #         logger.error(f"Unexpected error during Jupiter V6 API request: {e}", exc_info=True)
-    #         raise JupiterAPIError(f"Unexpected error: {e}", api_name="JupiterV6_Direct")
-    #
-    #
-    #    # Example usage of how record_transaction might be called internally if there were other trade types.
-    #    # This is not directly related to Jupiter swap but general structure.
-    #    # def record_manual_trade(self, pair_address: str, trade_type: str, amount: float, price: float, reason: str):
-    #        details = {
-    #            "pair_address": pair_address,
-    #            "trade_type": trade_type,
-    #            "amount": amount,
-    #            "price": price,
-    #            "reason": reason,
-    #            "timestamp": time.time(),
-    #            "source": "manual"
-    #        }
-    #        # Simplified result for manual trade logging
-    #        result = {
-    #            "success": True, 
-    #            "signature": None, # No on-chain signature for purely manual log
-    #            "message": f"Manual trade logged for {pair_address}."
-    #        }
-    #        self._record_transaction(result, details)
-    #        logger.info(f"Manual trade for {pair_address} recorded.")
+    # --- Limit Order (Trigger Order) Operations ---
+    async def place_limit_order(
+        self,
+        input_token_mint_str: str, # Token you are selling
+        output_token_mint_str: str, # Token you are buying
+        amount_in_tokens_float: float, # Amount of input_token to sell
+        target_price_float: float, # Target price: how many output_tokens per one input_token
+        order_side: str # "BUY" or "SELL" - "BUY" means buying output_token with input_token.
+                       # "SELL" means selling input_token for output_token.
+                       # This is relative to the output_token. Example: BUY SOL/USDC means input_token=USDC, output_token=SOL
+    ) -> Dict[str, Any]:
+        logger.info(f"Placeholder: place_limit_order called for {order_side} {amount_in_tokens_float} of {input_token_mint_str} for {output_token_mint_str} at price {target_price_float}")
+        # TODO: Implement logic using self.jupiter_client.create_trigger_order
+        # 1. Determine base and quote mints for Jupiter based on order_side and target_price interpretation.
+        #    Jupiter's trigger orders often require `base_mint_address` and `quote_mint_address`.
+        #    If buying SOL (output) with USDC (input) at price P (USDC per SOL):
+        #        base_mint = SOL, quote_mint = USDC, price = P
+        #    If selling SOL (input) for USDC (output) at price P (USDC per SOL):
+        #        base_mint = SOL, quote_mint = USDC, price = P (still price of base in terms of quote)
+        # 2. Convert amount_in_tokens_float to lamports for the base token of the trigger order.
+        # 3. Call self.jupiter_client.create_trigger_order with appropriate parameters.
+        # 4. Handle response and errors.
+        try:
+            # Example call structure (needs actual implementation)
+            # result = await self.jupiter_client.create_trigger_order(...)
+            # return {'success': True, 'order_id': result.get('id'), 'details': result}
+            raise NotImplementedError("place_limit_order is not yet implemented.")
+        except (JupiterAPIError, SolanaTransactionError, NumerusXBaseError) as e:
+            logger.error(f"Failed to place limit order: {e}", exc_info=True)
+            return {'success': False, 'error': str(e), 'order_id': None, 'details': {'original_exception': str(e)}}
+        except Exception as e:
+            logger.critical(f"Unexpected error placing limit order: {e}", exc_info=True)
+            return {'success': False, 'error': f"Unexpected error: {e}", 'order_id': None, 'details': {'original_exception': str(e)}}
 
-    # --- Methods for advanced order types (Limit, DCA) ---
-    # These would use self.jupiter_client for interaction with Jupiter API
-    # Placeholders for now, to be implemented based on todo/01-todo-core.md (Phase 3-4) or 03-todo-advanced-features.md
+
+    async def cancel_limit_order(self, order_id: str) -> Dict[str, Any]:
+        logger.info(f"Placeholder: cancel_limit_order called for order_id: {order_id}")
+        # TODO: Implement logic using self.jupiter_client.cancel_trigger_order
+        try:
+            # result = await self.jupiter_client.cancel_trigger_order(order_id=order_id, ...)
+            # return {'success': True, 'details': result}
+             raise NotImplementedError("cancel_limit_order is not yet implemented.")
+        except (JupiterAPIError, NumerusXBaseError) as e: # Assuming cancel might not involve on-chain tx errors directly
+            logger.error(f"Failed to cancel limit order {order_id}: {e}", exc_info=True)
+            return {'success': False, 'error': str(e), 'details': {'original_exception': str(e)}}
+        except Exception as e:
+            logger.critical(f"Unexpected error cancelling limit order {order_id}: {e}", exc_info=True)
+            return {'success': False, 'error': f"Unexpected error: {e}", 'details': {'original_exception': str(e)}}
+
+    async def get_open_limit_orders(
+        self,
+        owner_wallet_address: Optional[str] = None 
+    ) -> Dict[str, Any]:
+        logger.info(f"Placeholder: get_open_limit_orders called for owner: {owner_wallet_address or 'self'}")
+        # TODO: Implement logic using self.jupiter_client.get_trigger_orders
+        final_owner = owner_wallet_address if owner_wallet_address else str(self.jupiter_client.keypair.public_key)
+        try:
+            # orders = await self.jupiter_client.get_trigger_orders(owner_address=final_owner)
+            # return {'success': True, 'orders': orders, 'details': None}
+            raise NotImplementedError("get_open_limit_orders is not yet implemented.")
+        except (JupiterAPIError, NumerusXBaseError) as e:
+            logger.error(f"Failed to get open limit orders: {e}", exc_info=True)
+            return {'success': False, 'error': str(e), 'orders': [], 'details': {'original_exception': str(e)}}
+        except Exception as e:
+            logger.critical(f"Unexpected error getting open limit orders: {e}", exc_info=True)
+            return {'success': False, 'error': f"Unexpected error: {e}", 'orders': [], 'details': {'original_exception': str(e)}}
+
+    # --- DCA Operations ---
+    async def create_dca_plan(
+        self,
+        input_token_mint_str: str,
+        output_token_mint_str: str,
+        total_amount_in_tokens_float: float, # Total amount of input_token for the DCA
+        frequency_seconds: int, 
+        num_orders: int
+    ) -> Dict[str, Any]:
+        logger.info("Placeholder: create_dca_plan called.")
+        # TODO: Implement logic using self.jupiter_client.create_dca_plan
+        try:
+            raise NotImplementedError("create_dca_plan is not yet implemented.")
+        except (JupiterAPIError, SolanaTransactionError, NumerusXBaseError) as e:
+            logger.error(f"Failed to create DCA plan: {e}", exc_info=True)
+            return {'success': False, 'error': str(e), 'dca_plan_id': None, 'details': {'original_exception': str(e)}}
+        except Exception as e:
+            logger.critical(f"Unexpected error creating DCA plan: {e}", exc_info=True)
+            return {'success': False, 'error': f"Unexpected error: {e}", 'dca_plan_id': None, 'details': {'original_exception': str(e)}}
+
+
+    async def get_dca_plan_orders(self, dca_plan_id: str) -> Dict[str, Any]:
+        logger.info(f"Placeholder: get_dca_plan_orders for ID: {dca_plan_id}")
+        # TODO: Implement logic, possibly using self.jupiter_client.get_dca_orders
+        try:
+            raise NotImplementedError("get_dca_plan_orders is not yet implemented.")
+        except (JupiterAPIError, NumerusXBaseError) as e:
+            logger.error(f"Failed to get DCA plan orders for {dca_plan_id}: {e}", exc_info=True)
+            return {'success': False, 'error': str(e), 'orders': [], 'details': {'original_exception': str(e)}}
+        except Exception as e:
+            logger.critical(f"Unexpected error getting DCA plan orders for {dca_plan_id}: {e}", exc_info=True)
+            return {'success': False, 'error': f"Unexpected error: {e}", 'orders': [], 'details': {'original_exception': str(e)}}
+
+
+    async def close_dca_plan(self, dca_plan_id: str) -> Dict[str, Any]:
+        logger.info(f"Placeholder: close_dca_plan for ID: {dca_plan_id}")
+        # TODO: Implement logic using self.jupiter_client.close_dca_order
+        try:
+            raise NotImplementedError("close_dca_plan is not yet implemented.")
+        except (JupiterAPIError, SolanaTransactionError, NumerusXBaseError) as e:
+            logger.error(f"Failed to close DCA plan {dca_plan_id}: {e}", exc_info=True)
+            return {'success': False, 'error': str(e), 'details': {'original_exception': str(e)}}
+        except Exception as e:
+            logger.critical(f"Unexpected error closing DCA plan {dca_plan_id}: {e}", exc_info=True)
+            return {'success': False, 'error': f"Unexpected error: {e}", 'details': {'original_exception': str(e)}}
+
+    async def close_clients(self):
+        """Closes any open client sessions, like MarketDataProvider's aiohttp session."""
+        logger.info("Closing TradingEngine's internal clients...")
+        if self.market_data_provider and hasattr(self.market_data_provider, '__aexit__'):
+            try:
+                # Assuming MarketDataProvider has an __aexit__ or close method
+                await self.market_data_provider.__aexit__(None, None, None)
+                logger.info("MarketDataProvider client closed by TradingEngine.")
+            except Exception as e:
+                logger.error(f"Error closing MarketDataProvider in TradingEngine: {e}", exc_info=True)
+        # JupiterApiClient's AsyncClient is managed by its own __aenter__/__aexit__
+        # or needs an explicit close if TradingEngine created it.
+        # Based on current JupiterApiClient, it manages its own Solana AsyncClient session
+        # if passed one, or creates one. If TradingEngine passes a shared JupiterApiClient,
+        # the lifecycle of JupiterApiClient's internal Solana client is managed by JupiterApiClient itself.
+        logger.info("TradingEngine clients (if any were exclusively owned) closed.")

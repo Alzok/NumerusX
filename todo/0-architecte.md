@@ -287,3 +287,27 @@ Les modules de cette couche sont redéfinis pour agir comme des fournisseurs d'i
 -   Toutes les fonctionnalités avancées (MAC-MM, GNN Liquidité, TDA, Swarm Intelligence, etc.) de `todo/03-todo-advanced-features.md` deviennent des sources d'input potentielles ou des méthodes d'amélioration pour l'`AIAgent` lui-même.
 -   "Shadow Trading", "Deep RL Portfolio Management" pourraient être des modes de fonctionnement ou des logiques internes de l'`AIAgent`.
 -   "Rapports de Décision LLM" devient le "raisonnement" de l'`AIAgent`.
+
+## VII. Versionnement du Document d'Architecture
+
+-   Envisager un versionnement du document d'architecture au fur et à mesure de l'évolution du projet.
+
+## VI. Considérations Futures / Améliorations
+
+-   **Backtesting de l'Agent IA**: Développer des outils pour backtester la performance de l'Agent IA lui-même, en simulant le flux d'inputs qu'il aurait reçu.
+-   **Apprentissage Continu**: Mettre en place des mécanismes pour que l'Agent IA puisse apprendre et s'adapter avec le temps (ex: RL, feedback sur ses propres trades).
+-   **Optimisation des Prompts pour Gemini**: Affiner continuellement les prompts pour améliorer la qualité des décisions et la gestion des tokens.
+-   **Diversification des Modèles d'IA**: Envisager l'intégration d'autres modèles (spécialisés ou généralistes) en parallèle ou en fallback de Gemini au sein de l'`AIAgent`.
+-   **Simulation Avancée ("Digital Twin")**: Développer un jumeau numérique de l'environnement de trading pour des tests et optimisations plus poussés.
+
+## Points d'Attention / Risques / Ambiguïtés (0-architecte.md)
+* **Complexité**: L'architecture proposée est complète avec de nombreux composants interconnectés ; la gestion de cette complexité sera un défi.
+* **Dépendance IA Agent**: La performance et la fiabilité de l'AIAgent (via Google Gemini initialement) sont critiques. Dépendance aux APIs externes (disponibilité, coût, limitations).
+* **Flux de Données**: Les formats et schémas exacts pour la communication inter-modules, notamment les `aggregated_inputs` pour l'AIAgent, nécessitent une définition méticuleuse.
+* **Scalabilité AIAgent**: Anticiper les goulots d'étranglement potentiels de l'AIAgent.
+* **Évolution des "Stratégies"**: Le rôle des stratégies comme fournisseurs de signaux/features pour l'AIAgent est un changement conceptuel important.
+* **Rôle du `StrategySelector`**: L'interaction avec l'AIAgent doit être implémentée avec soin pour que l'AIAgent utilise efficacement les entrées pré-filtrées.
+* **Remplacement UI**: Le passage de NiceGUI à React/FastAPI est un changement majeur.
+
+### Suggestions
+* Envisager un versionnement du document d'architecture au fur et à mesure de l'évolution du projet.

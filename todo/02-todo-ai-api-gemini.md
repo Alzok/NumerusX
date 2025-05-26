@@ -329,3 +329,24 @@
     -   [ ] Mettre en place des seuils d'alerte dans le système de monitoring (ou via logs) si le coût journalier/hebdomadaire dépasse un budget prédéfini dans `Config`.
 
 En suivant ces étapes, NumerusX pourra exploiter la vitesse et l'intelligence de Gemini 2.5 Flash pour prendre des décisions de trading éclairées, tout en gardant un contrôle sur les coûts et la robustesse du système.
+
+## Points d'Attention / Risques / Ambiguïtés (02-todo-ai-api-gemini.md)
+
+* **Prompt Engineering (Tâche 3.2)**:
+    * L'efficacité dépendra fortement de la qualité et de la concision du prompt ; itérations nécessaires.
+    * Respecter `GEMINI_MAX_TOKENS_INPUT`. Des stratégies de résumé/sélection pour `aggregated_inputs` pourraient être nécessaires si le contexte est trop volumineux.
+* **Parsing Réponse (Tâche 3.3)**:
+    * Les LLMs peuvent ne pas toujours retourner un JSON valide. La validation Pydantic et les stratégies de retry/fallback (HOLD) sont cruciales.
+* **Gestion des Coûts (Tâche 5.2)**:
+    * Vérifier et configurer précisément les tarifs du modèle Gemini utilisé.
+    * Monitorer continuellement les coûts API.
+* **Gestion Erreurs et Fallback (Tâches 3.1, 4.2)**: Définir comment `DexBot` gère une défaillance persistante de l'AIAgent.
+* **`max_output_tokens` (AIAgent.decide_trade)**: La logique `GEMINI_MAX_TOKENS_INPUT // 4` est arbitraire. Envisager `Config.GEMINI_MAX_TOKENS_OUTPUT` distinct, basé sur la taille attendue de la réponse JSON.
+* **Clarté des champs `aggregated_inputs`**: Assurer la consistance du format des données fournies par les différents modules.
+* **Complétude du logging `inputs_snippet`**: 1000 caractères pour le snippet peuvent être insuffisants pour le debug.
+
+## Suggestions (02-todo-ai-api-gemini.md)
+
+* **Versionnement des Prompts**: Mettre en place une gestion de version pour les prompts de l'AIAgent.
+* **Raisonnement Structuré**: Encourager le prompt à demander des points clés ou facteurs structurés dans le champ "reasoning" pour faciliter l'analyse/affichage.
+* **Snippet d'Input Loggé**: Rendre la taille du snippet configurable ou l'ajuster dynamiquement, ou logger le prompt complet si possible.

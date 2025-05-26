@@ -132,7 +132,7 @@ class TestJupiterApiClient(unittest.IsolatedAsyncioTestCase):
         self.mock_v_tx_instance.message.payer = self.mock_keypair_instance.pubkey # Ensure payer matches
         self.mock_v_tx_instance.message_data.return_value = b"message_data_to_sign"
         self.MockVersionedTransaction.from_bytes.return_value = self.mock_v_tx_instance
-        self.MockVersionedTransaction.populate = MagicMock(return_value=self.mock_v_tx_instance) # Populate returns the signed tx
+        self.MockVersionedTransaction.populate.return_value = self.mock_v_tx_instance # Populate returns the signed tx
 
         self.client = JupiterApiClient(
             private_key_bs58=self.config.SOLANA_PRIVATE_KEY_BS58,
@@ -409,6 +409,29 @@ class TestJupiterApiClient(unittest.IsolatedAsyncioTestCase):
     async def test_close_async_client(self):
         await self.client.close_async_client()
         self.mock_async_client_instance.close.assert_awaited_once()
+
+    async def test_close_dca_order_success(self):
+        dca_order_id = "DCAOrderPublicKey11111111111111111111111"
+        mock_sdk_response = {"status": "closed", "dca_order_id": dca_order_id}
+        self.mock_jupiter_sdk_instance.dca_close.return_value = mock_sdk_response
+
+        result = await self.client.close_dca_order(dca_order_id_str=dca_order_id)
+
+        self.assertEqual(result, mock_sdk_response)
+        self.mock_jupiter_sdk_instance.dca_close.assert_awaited_once_with(
+            dca_order_id=Pubkey.from_string(dca_order_id)
+        )
+
+    async def test_close_dca_order_sdk_error(self):
+        dca_order_id = "DCAOrderPublicKey11111111111111111111111"
+        sdk_error_message = "SDK close DCA order failed"
+        self.mock_jupiter_sdk_instance.dca_close.side_effect = JupiterPythonSdkError(sdk_error_message)
+
+        with self.assertRaises(JupiterAPIError) as context:
+            await self.client.close_dca_order(dca_order_id_str=dca_order_id)
+        
+        self.assertIn(sdk_error_message, str(context.exception))
+        self.assertIsInstance(context.exception.original_exception, JupiterPythonSdkError)
 
 # To run these tests (if you save this as test_jupiter_api_client.py in a tests/ directory):
 # Ensure pytest and pytest-asyncio are installed: pip install pytest pytest-asyncio
