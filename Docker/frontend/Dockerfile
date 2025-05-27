@@ -1,41 +1,17 @@
-# Stage 1: Build the React application
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS development
 
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy package.json and package-lock.json (or yarn.lock)
-COPY numerusx-ui/package.json numerusx-ui/package-lock.json* ./
-# If using yarn, uncomment below and comment out npm ci
-# COPY numerusx-ui/yarn.lock ./
+# Copy the initialization script into the container
+COPY init-frontend.sh /app/init-frontend.sh
 
-# Install dependencies
-# Use npm ci for reproducible builds if package-lock.json is present
-RUN npm ci
-# If using yarn, uncomment below and comment out npm ci
-# RUN yarn install --frozen-lockfile
+# Make the script executable
+RUN chmod +x /app/init-frontend.sh
 
-# Copy the rest of the frontend application code
-COPY numerusx-ui/ .
+# Expose the Vite default port
+EXPOSE 5173
 
-# Set build-time environment variables if needed
-# ARG REACT_APP_BACKEND_URL
-# ENV REACT_APP_BACKEND_URL=$REACT_APP_BACKEND_URL
-
-# Build the application
-RUN npm run build
-
-# Stage 2: Serve the built application with Nginx
-FROM nginx:1.25-alpine
-
-# Copy the build output from the builder stage
-COPY --from=builder /app/dist /usr/share/nginx/html
-
-# Copy a custom Nginx configuration file (optional, but recommended)
-# This file would handle proxying API requests to the backend and serving React app
-COPY Docker/frontend/nginx.conf /etc/nginx/conf.d/default.conf
-
-# Expose port 80 (or the port Nginx is configured to listen on)
-EXPOSE 80
-
-# Start Nginx when the container launches
-CMD ["nginx", "-g", "daemon off;"] 
+# Command to run the initialization script
+# The script will handle 'npm install' and 'npm run dev'
+CMD ["/app/init-frontend.sh"] 

@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, Optional, Literal
+from typing import Dict, Any, Optional, Literal, List
 import json # Added for logging and example
 import time # Added for example
 import asyncio # Added for async decide_trade
@@ -13,6 +13,7 @@ from app.config import Config
 # from app.portfolio_manager import PortfolioManager
 # from app.strategy_framework import BaseStrategy
 from app.ai_agent.gemini_client import GeminiClient # Import GeminiClient
+from app.models.ai_inputs import AggregatedInputs, OHLCV, SignalSourceInput # Import AggregatedInputs, OHLCV, SignalSourceInput
 from pydantic import BaseModel, ValidationError, confloat, constr # Added BaseModel, ValidationError, confloat, constr
 
 logger = logging.getLogger(__name__)
@@ -57,7 +58,7 @@ class AIAgent:
 
         logger.info("AIAgent initialisé avec GeminiClient.")
 
-    async def decide_trade(self, aggregated_inputs: Dict[str, Any]) -> Dict[str, Any]:
+    async def decide_trade(self, aggregated_inputs_model: AggregatedInputs) -> Dict[str, Any]:
         """
         Prend une décision de trading basée sur les inputs agrégés en utilisant Gemini.
         Retourne un dictionnaire structuré compatible avec TradeExecutor.execute_agent_order
@@ -65,7 +66,7 @@ class AIAgent:
         # Default 'HOLD' decision in case of errors
         default_hold_decision = {
             "decision": "HOLD",
-            "token_pair": aggregated_inputs.get("target_pair_info", {}).get("target_token_symbol", "N/A") + "/" + aggregated_inputs.get("target_pair_info", {}).get("base_token_symbol_for_pair", "N/A"),
+            "token_pair": f"{aggregated_inputs_model.target_pair.symbol if aggregated_inputs_model.target_pair else 'N/A'}",
             "amount_usd": None,
             "confidence": 0.1,
             "stop_loss_price": None,
@@ -73,27 +74,34 @@ class AIAgent:
             "reasoning": "Default HOLD due to an internal error or failure in AI decision process."
         }
 
+        # Validate aggregated_inputs_model (already an instance, Pydantic did its job on creation)
+        # For extra safety or if it were a dict, we'd do:
+        # try:
+        #     validated_inputs = AggregatedInputs(**aggregated_inputs_dict)
+        # except ValidationError as e:
+        #     logger.error(f"Validation error for aggregated_inputs: {e.errors()}", exc_info=True)
+        #     default_hold_decision['reasoning'] = f"AIAgent internal error: Invalid aggregated inputs. Details: {e.errors()}"
+        #     return default_hold_decision
+
         # 1. Prepare prompt for Gemini
         prompt_for_gemini: Optional[str] = None
         try:
             # Log a snippet of inputs (or full if debug enabled later)
-            inputs_for_log = {k: v for k, v in aggregated_inputs.items() if k not in ['market_data']} # Avoid logging large market data
-            inputs_snippet_log = json.dumps(inputs_for_log, default=str, indent=2)
+            inputs_for_log_dict = aggregated_inputs_model.model_dump(exclude_none=True, exclude={'market_data': {'recent_ohlcv_1h'}}) # Example exclusion for brevity
+            inputs_snippet_log = json.dumps(inputs_for_log_dict, default=str, indent=2)
+
             if len(inputs_snippet_log) > (self.config.LOG_MAX_MSG_LENGTH // 2): # Use a config for max log length
                 inputs_snippet_log = inputs_snippet_log[:(self.config.LOG_MAX_MSG_LENGTH // 2)] + "... (inputs truncated for log)"
             logger.debug(f"AIAgent.decide_trade called with inputs (snippet): {inputs_snippet_log}")
-
-            # Serialize full aggregated_inputs for the prompt itself
-            # Handled by _construct_gemini_prompt
             
         except Exception as e:
             logger.error(f"Erreur lors de la préparation du snippet de log des inputs pour AIAgent: {e}", exc_info=True)
             # Continue, as logging failure here isn't critical for decision making
 
         try:
-            prompt_for_gemini = self._construct_gemini_prompt(aggregated_inputs)
+            prompt_for_gemini = self._construct_gemini_prompt(aggregated_inputs_model)
             if self.config.DEBUG_PROMPTS: # Instruction 5 from review
-                logger.debug(f"Full prompt for Gemini:\n{prompt_for_gemini}")
+                logger.debug(f"Full prompt for Gemini:\\n{prompt_for_gemini}")
             elif len(prompt_for_gemini) > 2000 : # Log snippet if too long and not debug
                  logger.debug(f"Prompt for Gemini (snippet):\n{prompt_for_gemini[:1000]}\\n...\\n{prompt_for_gemini[-1000:]}")
 
@@ -162,46 +170,87 @@ class AIAgent:
         logger.info(f"AIAgent final decision for TradeExecutor: {final_decision_for_executor}")
         return final_decision_for_executor
 
-    def _construct_gemini_prompt(self, aggregated_inputs: Dict[str, Any]) -> str:
+    def _summarize_ohlcv(self, ohlcv_list: List[OHLCV], max_candles: int = 12) -> List[OHLCV]:
+        """Summarizes OHLCV data to include max_candles most recent ones."""
+        if len(ohlcv_list) > max_candles:
+            logger.debug(f"Summarizing OHLCV data from {len(ohlcv_list)} to {max_candles} candles.")
+            return ohlcv_list[-max_candles:]
+        return ohlcv_list
+
+    def _summarize_signal_sources(self, signal_sources: List[SignalSourceInput], max_signals: int = 3) -> List[SignalSourceInput]:
+        """Summarizes signal sources, prioritizing higher confidence and non-neutral signals."""
+        if not signal_sources or len(signal_sources) <= max_signals:
+            return signal_sources
+
+        # Sort by confidence (desc) and then by whether it's neutral (False first)
+        sorted_signals = sorted(
+            signal_sources, 
+            key=lambda s: (s.signal not in ["NEUTRAL", "HOLD"], s.confidence or 0), 
+            reverse=True
+        )
+        logger.debug(f"Summarizing signal sources from {len(signal_sources)} to {max_signals} based on confidence/type.")
+        return sorted_signals[:max_signals]
+
+    def _construct_gemini_prompt(self, aggregated_inputs_model: AggregatedInputs) -> str:
         """
         Constructs the full prompt for Gemini based on aggregated_inputs.
-        (Corresponds to todo/02-todo-ai-api-gemini.md Tâche 3.2)
+        Includes token optimization strategies.
+        (Corresponds to todo/02-todo-ai-api-gemini.md Tâche 3.2 & 3.2.5)
         """
-        # Extract target pair info for clarity in prompt
-        target_pair_info = aggregated_inputs.get("target_pair_info", {})
-        target_symbol = target_pair_info.get("target_token_symbol", "N/A")
-        base_symbol = target_pair_info.get("base_token_symbol_for_pair", "N/A")
-        current_pair_str = f"{target_symbol}/{base_symbol}"
+        current_pair_str = "N/A"
+        if aggregated_inputs_model.target_pair:
+            current_pair_str = aggregated_inputs_model.target_pair.symbol
 
-        # Serialize inputs for the prompt (can be selective to reduce token count)
-        # Example: Exclude very verbose fields or summarize them if necessary
-        prompt_payload_data = {}
-        for key, value in aggregated_inputs.items():
-            if key == "market_data" and value and "ohlcv_data" in value and value["ohlcv_data"]:
-                # Summarize OHLCV if too long, or just pass recent N candles
-                # For now, let's ensure it's serializable and not excessively long
-                # A better summarization or feature extraction should happen before this point if needed.
-                prompt_payload_data[key] = value # Pass as is for now, assuming it's managed
-            elif key == "signal_sources" and value and "strategy_analysis" in value:
-                # Ensure strategy analysis is concise
-                prompt_payload_data[key] = value
-            else:
-                prompt_payload_data[key] = value
+        # Create a mutable copy for summarization
+        summarized_inputs_dict = aggregated_inputs_model.model_dump(exclude_none=True)
+
+        # Summarize market_data.recent_ohlcv_1h
+        if summarized_inputs_dict.get('market_data') and summarized_inputs_dict['market_data'].get('recent_ohlcv_1h'):
+            original_ohlcv = [OHLCV(**o) for o in summarized_inputs_dict['market_data']['recent_ohlcv_1h']]
+            summarized_ohlcv = self._summarize_ohlcv(original_ohlcv, max_candles=self.config.GEMINI_PROMPT_MAX_OHLCV_CANDLES)
+            summarized_inputs_dict['market_data']['recent_ohlcv_1h'] = [o.model_dump() for o in summarized_ohlcv]
+
+        # Summarize signal_sources
+        if summarized_inputs_dict.get('signal_sources'):
+            original_signals = [SignalSourceInput(**s) for s in summarized_inputs_dict['signal_sources']]
+            summarized_signals = self._summarize_signal_sources(original_signals, max_signals=self.config.GEMINI_PROMPT_MAX_SIGNAL_SOURCES)
+            summarized_inputs_dict['signal_sources'] = [s.model_dump() for s in summarized_signals]
         
-        try:
-            prompt_payload_json = json.dumps(prompt_payload_data, default=str, indent=2)
-        except Exception as e:
-            logger.error(f"Error serializing aggregated_inputs for prompt construction: {e}", exc_info=True)
-            raise ValueError(f"Could not serialize inputs for Gemini prompt: {e}")
+        # TODO: Add more summarizations for other potentially verbose fields if necessary
+        # e.g., long reasoning snippets in signals, news summaries in sentiment_analysis, etc.
 
-        # Structure from todo/02-todo-ai-api-gemini.md - Tâche 3.2
+        try:
+            prompt_payload_json = json.dumps(summarized_inputs_dict, default=str, indent=2)
+        except Exception as e:
+            logger.error(f"Error serializing summarized AggregatedInputs for prompt construction: {e}", exc_info=True)
+            raise ValueError(f"Could not serialize summarized AggregatedInputs for Gemini prompt: {e}")
+
+        # Estimate token count (very rough estimate, actual tokenization is complex)
+        # A simple proxy: character count / 4 (average characters per token)
+        estimated_tokens = len(prompt_payload_json) // 4 
+        if estimated_tokens > self.config.GEMINI_MAX_TOKENS_INPUT * 0.9: # If > 90% of limit
+            logger.warning(
+                f"Estimated prompt token count ({estimated_tokens}) is high, close to limit ({self.config.GEMINI_MAX_TOKENS_INPUT}). "
+                f"Consider more aggressive summarization. Payload length: {len(prompt_payload_json)} chars."
+            )
+        elif estimated_tokens > self.config.GEMINI_MAX_TOKENS_INPUT:
+            logger.error(
+                f"Estimated prompt token count ({estimated_tokens}) EXCEEDS limit ({self.config.GEMINI_MAX_TOKENS_INPUT}). "
+                f"Prompt will likely be rejected. Payload length: {len(prompt_payload_json)} chars."
+            )
+            # In a production system, we might truncate more aggressively here or raise an error to prevent API call
+            # For now, just log error.
+
         prompt = f"""ROLE: NumerusX Solana Trading Agent (using {self.config.GEMINI_MODEL_NAME} model).
 Analyze the following data for {current_pair_str} and provide a trading decision.
+
+DATA:
+{prompt_payload_json}
 
 INSTRUCTIONS:
 Based ONLY on the provided data, decide to BUY, SELL, or HOLD {current_pair_str}.
 If BUY or SELL:
-  - Specify amount_usd to trade (consider risk parameters and available capital). This field is MANDATORY for BUY/SELL.
+  - Specify amount_usd to trade (consider risk parameters and available capital).
   - Suggest stop_loss_price and take_profit_price.
 Output your decision and reasoning STRICTLY in the following JSON format:
 {{
@@ -211,16 +260,12 @@ Output your decision and reasoning STRICTLY in the following JSON format:
   "confidence": float,
   "stop_loss_price": float | null,
   "take_profit_price": float | null,
-  "reasoning": "Concise explanation based on synthesized data points (max 500 chars)."
+  "reasoning": "concise explanation based on synthesized data points."
 }}
 Prioritize capital preservation. If data is conflicting or insufficient for a high-confidence trade, prefer HOLD.
-Be concise in your reasoning.
-Ensure your output strictly follows the JSON format specified. Do not include any text before or after the JSON object.
-
-PROVIDED DATA:
-{prompt_payload_json}
-
-JSON RESPONSE:"""
+Be concise in your reasoning. Max 2-3 sentences.
+Ensure your output strictly follows the JSON format specified, with no extra text before or after the JSON block.
+"""
         return prompt
 
     # D'autres méthodes pourraient être ajoutées ici pour:
@@ -230,36 +275,81 @@ JSON RESPONSE:"""
 
 async def main_test_agent():
     class MockConfig(Config):
-        pass
+        def __init__(self):
+            super().__init__() # Initialize base Config to load .env etc.
+            # Override specific values for testing if needed
+            self.GOOGLE_API_KEY = self.get_env_variable("GOOGLE_API_KEY_TEST", self.GOOGLE_API_KEY) # Example of override
+            self.GEMINI_MODEL_NAME = "gemini-1.5-flash-latest" # Use a known model for testing
+            self.DEBUG_PROMPTS = True
+            self.LOG_MAX_MSG_LENGTH = 2048
+
+
     mock_config = MockConfig()
-    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-    # Assurez-vous que GOOGLE_API_KEY est dans votre .env pour que GeminiClient s'initialise
-    if not mock_config.GOOGLE_API_KEY:
-        logger.error("GOOGLE_API_KEY non trouvé dans les variables d'env. Test de AIAgent annulé.")
-        return
-
     ai_agent = AIAgent(config=mock_config)
-    if not ai_agent.gemini_client.model:
-        logger.error("Initialisation du modèle GeminiClient échouée. Test de AIAgent annulé.")
-        return
 
-    sample_inputs = {
-        "timestamp_utc": "2023-10-27T10:30:00Z",
-        "target_pair": { "symbol": "SOL/USDC", "input_mint": "So11111111111111111111111111111111111111112", "output_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"},
-        "market_data": { "current_price": 165.30, "recent_trend_1h": "UPWARD"},
-        "signal_sources": [{"source_name": "MomentumStrategy_1h_RSI_MACD", "signal": "STRONG_BUY", "confidence": 0.85}],
-        "risk_manager_inputs": { "max_trade_size_usd": 200.00},
-        "portfolio_manager_inputs": { "available_capital_usdc": 4000.00},
-    }
+    # Construct a sample AggregatedInputs object for testing
+    # This would normally be built by DexBot
+    from datetime import datetime
+    from app.models.ai_inputs import (
+        TargetPairInfo, MarketDataInput, SignalSourceInput, PredictionEngineInput,
+        RiskManagerInput, PortfolioManagerInput, SecurityCheckerInput, OHLCV, KeySupportResistance,
+        PricePrediction, SentimentAnalysis
+    )
+    
+    sample_aggregated_inputs = AggregatedInputs(
+        request_id="test-req-001",
+        timestamp_utc=datetime.utcnow(),
+        target_pair=TargetPairInfo(symbol="SOL/USDC", input_mint="So11111111111111111111111111111111111111112", output_mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
+        market_data=MarketDataInput(
+            current_price=170.50,
+            recent_ohlcv_1h=[OHLCV(t=int(time.time()) - 3600, o=169.0, h=171.0, l=168.5, c=170.5, v=1000)],
+            liquidity_depth_usd=10000000,
+            recent_trend_1h="UPWARD",
+            key_support_resistance=KeySupportResistance(support_1=165.0, resistance_1=175.0),
+            trading_volume_24h_usd=500000000
+        ),
+        signal_sources=[
+            SignalSourceInput(source_name="TestStrategy", signal="BUY", confidence=0.7, reasoning_snippet="Test signal shows buy.")
+        ],
+        prediction_engine_outputs=PredictionEngineInput(
+            price_prediction_4h=PricePrediction(target_price_min=172.0, target_price_max=178.0, confidence=0.65),
+            market_regime_1h="VOLATILE_TRENDING",
+            sentiment_analysis=SentimentAnalysis(overall_score=0.5, dominant_sentiment="NEUTRAL")
+        ),
+        risk_manager_inputs=RiskManagerInput(
+            max_exposure_per_trade_percentage=0.01, # 1%
+            current_portfolio_value_usd=5000.0,
+            available_capital_usdc=2000.0,
+            max_trade_size_usd=50.0 # 1% of 5000
+        ),
+        portfolio_manager_inputs=PortfolioManagerInput(
+            current_positions=[]
+        ),
+        security_checker_inputs=SecurityCheckerInput(
+            target_token_symbol="SOL",
+            target_token_security_score=0.85
+        )
+    )
 
-    decision = await ai_agent.decide_trade(sample_inputs)
-    print(f"\n--- Décision Finale de l'Agent IA ---\n{json.dumps(decision, indent=2)}\n----------------------------------")
+    print("\n--- Testing AIAgent with Gemini ---")
+    if not mock_config.GOOGLE_API_KEY or "YOUR_API_KEY" in mock_config.GOOGLE_API_KEY:
+        print("GOOGLE_API_KEY not found or is a placeholder in .env or config. Skipping live API call.")
+        print("Please set a valid GOOGLE_API_KEY (e.g., GOOGLE_API_KEY_TEST in .env) to run this test.")
+        # Simulate a HOLD response if API key is missing
+        decision = {
+            "decision": "HOLD", "token_pair": "SOL/USDC", "amount_usd": None, 
+            "confidence": 0.1, "reasoning": "Skipped live API call due to missing API key."
+        }
+    else:
+        decision = await ai_agent.decide_trade(sample_aggregated_inputs)
+    
+    print("\n--- AI Agent Decision ---")
+    print(json.dumps(decision, indent=2))
+    print("------------------------")
 
-if __name__ == '__main__':
-    # loop = asyncio.get_event_loop()
-    # loop.run_until_complete(main_test_agent())
-    # More robust way to run asyncio for scripts:
+if __name__ == "__main__":
+    # Setup basic logging for the test
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     asyncio.run(main_test_agent())
 
     # Example of how an encrypted value from config might be used by the agent if needed

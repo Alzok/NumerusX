@@ -18,6 +18,25 @@ from app.ai_agent import AIAgent # Import the new AIAgent
 import json # For logging agent decisions
 from app.utils.jupiter_api_client import JupiterApiClient # Added
 from app.utils.exceptions import NumerusXBaseError, DataCollectionError # For general error handling and DataCollectionError
+from datetime import datetime # Added for timestamp_utc
+import uuid # Added for request_id
+
+from app.models.ai_inputs import (
+    AggregatedInputs,
+    TargetPairInfo,
+    MarketDataInput,
+    OHLCV,
+    KeySupportResistance,
+    SignalSourceInput,
+    PredictionEngineInput,
+    PricePrediction,
+    SentimentAnalysis,
+    RiskManagerInput,
+    PortfolioManagerInput,
+    PortfolioPositionInput,
+    SecurityCheckerInput,
+    TokenSecurityRisk
+)
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +175,8 @@ class DexBot:
         """Handles initialization steps that require async operations, like fetching initial portfolio value."""
         try:
             initial_portfolio_value = await self.portfolio_manager.get_total_portfolio_value()
-            self.risk_manager.update_portfolio_value(initial_portfolio_value) # Assuming this is sync
+            # Ensure RiskManager has the latest portfolio value. This could be a direct update or managed internally by RM.
+            self.risk_manager.update_current_portfolio_value(initial_portfolio_value)
             self.performance_monitor.track_portfolio_value(initial_portfolio_value)
             logger.info(f"Initial portfolio value for RiskManager and PerformanceMonitor: ${initial_portfolio_value:.2f}")
         except Exception as e:
@@ -263,240 +283,375 @@ class DexBot:
             logger.error(f"Error resolving mints for pair '{pair_symbol_str}': {e}", exc_info=True)
             return None
 
-    async def _gather_ai_agent_inputs(self, target_symbol: str, target_mint: str, base_mint_for_pair: str, base_symbol_for_pair: str) -> Optional[Dict[str, Any]]:
-        """Gathers all necessary inputs for the AIAgent for a specific target token and its pair."""
-        logger.info(f"Gathering AI Agent inputs for target: {target_symbol} ({target_mint}) paired with {base_symbol_for_pair} ({base_mint_for_pair})...")
-        inputs: Dict[str, Any] = {
-            'timestamp_utc': time.time(),
-            'target_pair_info': {
-                'target_token_symbol': target_symbol,
-                'target_token_mint': target_mint,
-                'base_token_symbol_for_pair': base_symbol_for_pair, # The other token in the pair (e.g. USDC)
-                'base_token_mint_for_pair': base_mint_for_pair
-            },
-            'market_data': { 'current_price': None, 'ohlcv_data': None, 'liquidity_info': None, 'trends': None },
-            'signal_sources': { 'strategy_analysis': None },
-            'prediction_engine_outputs': { 'price_prediction': None, 'market_regime': None },
-            'risk_manager_inputs': {},
-            'portfolio_manager_inputs': {},
-            'security_checker_inputs': { 'target_token_security': None, 'base_token_security': None }
-        }
+    async def _gather_ai_agent_inputs(self, target_symbol: str, target_mint: str, base_mint_for_pair: str, base_symbol_for_pair: str) -> Optional[AggregatedInputs]:
+        """
+        Gathers all necessary inputs from various bot components and assembles
+        them into the AggregatedInputs Pydantic model for the AIAgent.
+        This corresponds to todo/02-todo-ai-api-gemini.md Tâche 3.1.5
+        """
+        request_id = str(uuid.uuid4())
+        timestamp_utc = datetime.utcnow()
+        current_pair_symbol_str = f"{target_symbol}/{base_symbol_for_pair}"
+        logger.info(f"Gathering inputs for AIAgent (request_id: {request_id}, pair: {current_pair_symbol_str})")
 
+        target_pair_info = TargetPairInfo(
+            symbol=current_pair_symbol_str,
+            input_mint=target_mint, # Assuming target_mint is the one we want to buy/sell
+            output_mint=base_mint_for_pair # And base_mint is the quote currency
+        )
+
+        # 1. Market Data
+        market_data_input: Optional[MarketDataInput] = None
         try:
-            # 1. Market Data for Target Pair
-            price_res = await self.market_data_provider.get_token_price(target_mint, base_mint_for_pair)
-            inputs['market_data']['current_price'] = price_res['data'] if price_res.get('success') else None
+            md_price_result = await self.market_data_provider.get_token_price(target_mint, base_mint_for_pair)
+            md_ohlcv_result = await self.market_data_provider.get_ohlcv_data_dexscreener(current_pair_symbol_str, '1h', limit=24) # Example: 1h, last 24 periods
+            md_liquidity_result = await self.market_data_provider.get_liquidity_info_dexscreener(current_pair_symbol_str)
+            # TODO: Add calls for trend, support/resistance, volatility, volume if available
             
-            ohlcv_res = await self.market_data_provider.get_ohlcv_data(target_mint, base_mint_for_pair, timeframe='1h', limit=100)
-            inputs['market_data']['ohlcv_data'] = ohlcv_res['data'] if ohlcv_res.get('success') else None
-            
-            # TODO: Add more market data: liquidity, trends (from MDP methods)
-            # liquidity_res = await self.market_data_provider.get_liquidity_for_pair(target_mint, base_mint_for_pair) 
-            # inputs['market_data']['liquidity_info'] = liquidity_res['data'] if liquidity_res.get('success') else None
+            ohlcv_list = []
+            if md_ohlcv_result['success'] and md_ohlcv_result['data']:
+                for bar in md_ohlcv_result['data'][:24]: # Take up to 24 candles for the prompt
+                    ohlcv_list.append(OHLCV(t=int(bar['timestamp']/1000), o=bar['open'], h=bar['high'], l=bar['low'], c=bar['close'], v=bar['volumeUsd']))
 
-            # 2. Signal Sources (Strategy Analysis)
-            if self.strategy:
-                # The strategy's `analyze` method needs to be adapted.
-                # For now, assume it can take mints and return a dict of features.
-                # This is a placeholder. The actual strategy `analyze` method might need `market_data` for its input.
-                try:
-                    strategy_input_data = inputs['market_data'] # Strategy might need current market data
-                    # Strategy `analyze` method needs to be defined to accept this and return serializable dict
-                    analysis_output = await self.strategy.analyze(target_mint, base_mint_for_pair, strategy_input_data)
-                    inputs['signal_sources']['strategy_analysis'] = analysis_output
-                except Exception as e:
-                    logger.warning(f"Failed to get analysis from strategy '{self.strategy.get_name()}' for {target_symbol}: {e}", exc_info=True)
-                    inputs['signal_sources']['strategy_analysis'] = {"error": str(e)}
-            
-            # 3. Prediction Engine Outputs
-            if self.prediction_engine:
-                try:
-                    prediction: Optional[PredictionResult] = await self.prediction_engine.predict_price(target_mint, timeframe='1h')
-                    if prediction:
-                        inputs['prediction_engine_outputs']['price_prediction'] = prediction.to_dict() # Use to_dict()
-                        # TODO: Market regime if PredictionEngine provides it
-                    else:
-                         inputs['prediction_engine_outputs']['price_prediction'] = None
-                except Exception as e:
-                    logger.warning(f"Failed to get prediction for {target_symbol}: {e}", exc_info=True)
-                    inputs['prediction_engine_outputs']['price_prediction'] = {"error": str(e)}
-
-            # 4. Risk Manager Inputs
-            current_portfolio_value = await self.portfolio_manager.get_total_portfolio_value() # Refresh for latest
-            self.risk_manager.update_portfolio_value(current_portfolio_value)
-            inputs['risk_manager_inputs'] = {
-                'max_risk_per_trade_usd': self.risk_manager.calculate_max_risk_per_trade_usd(),
-                'current_total_exposure_usd': self.risk_manager.get_current_total_exposure_usd(),
-                'global_risk_level': self.risk_manager.get_global_risk_level(),
-                'available_capital_for_new_trade_usd': self.risk_manager.get_available_capital_for_new_trade_usd(target_mint)
-            }
-
-            # 5. Portfolio Manager Inputs
-            inputs['portfolio_manager_inputs'] = {
-                'available_cash_usd': self.portfolio_manager.get_available_cash_for_trading(),
-                'total_portfolio_value_usd': current_portfolio_value,
-                'open_positions': await self.portfolio_manager.get_open_positions_summary(output_format='dict'),
-                'target_token_position': await self.portfolio_manager.get_position_details(target_mint)
-            }
-
-            # 6. Security Checker Inputs
-            target_is_safe, target_risks = await self.security_checker.check_token_security(target_mint)
-            inputs['security_checker_inputs']['target_token_security'] = {
-                'is_safe': target_is_safe,
-                'risks': [r.to_dict() for r in target_risks] if target_risks else []
-            }
-            if base_mint_for_pair != self.config.BASE_ASSET: # Only check non-USDC base
-                base_is_safe, base_risks = await self.security_checker.check_token_security(base_mint_for_pair)
-                inputs['security_checker_inputs']['base_token_security'] = {
-                    'is_safe': base_is_safe,
-                    'risks': [r.to_dict() for r in base_risks] if base_risks else []
-                }
-            else:
-                 inputs['security_checker_inputs']['base_token_security'] = {'is_safe': True, 'risks': [], 'info': 'Bot base asset (e.g. USDC)'}
-            
-            logger.info(f"Successfully gathered AI inputs for {target_symbol}.")
-            return inputs
-
+            market_data_input = MarketDataInput(
+                current_price=md_price_result['data']['price'] if md_price_result['success'] else None,
+                recent_ohlcv_1h=ohlcv_list if ohlcv_list else None,
+                liquidity_depth_usd=md_liquidity_result['data']['liquidity_usd'] if md_liquidity_result['success'] and md_liquidity_result['data'] else None,
+                # Fields like recent_trend_1h, key_support_resistance, volatility_1h_atr_percentage, trading_volume_24h_usd need to be populated
+                # For now, we'll leave them as None or with placeholder logic if easy
+                trading_volume_24h_usd=md_liquidity_result['data']['volume_24h_usd'] if md_liquidity_result['success'] and md_liquidity_result['data'] else None
+            )
         except Exception as e:
-            logger.error(f"Critical error gathering AI Agent inputs for {target_symbol} ({target_mint}): {e}", exc_info=True)
-            # Raise a custom error to be caught by _run_cycle if data collection fails catastrophically
-            raise DataCollectionError(f"Failed to gather inputs for {target_symbol}: {e}") from e
+            logger.error(f"Error gathering market data for AIAgent: {e}", exc_info=True)
+            # Decide if this is critical; for now, we might proceed with partial data
+
+        if not market_data_input or not market_data_input.current_price:
+            logger.warning("Critical market data (current price) missing for AIAgent. Skipping decision.")
+            return None
+
+        # 2. Signal Sources (Strategies, Analytics Engine)
+        signal_sources_inputs: List[SignalSourceInput] = []
+        try:
+            if self.strategy:
+                # This needs to be async if strategy.analyze or generate_signal is async
+                # For now, assuming synchronous or handled within strategy methods
+                # The strategy's output needs to be adapted to SignalSourceInput format
+                strategy_output = await self.strategy.generate_signal_async() # Assuming an async method returning a dict
+                if strategy_output and strategy_output.get('signal') != 'NEUTRAL': # Example: only add non-neutral signals
+                    signal_sources_inputs.append(SignalSourceInput(
+                        source_name=self.strategy.get_name(),
+                        signal=strategy_output.get('signal', 'ERROR').upper(), # Ensure uppercase standard
+                        confidence=strategy_output.get('confidence'),
+                        indicators=strategy_output.get('indicators'),
+                        reasoning_snippet=strategy_output.get('reasoning')
+                    ))
+            # TODO: Add AdvancedAnalyticsEngine if it becomes a separate signal provider
+        except Exception as e:
+            logger.error(f"Error gathering signal sources for AIAgent: {e}", exc_info=True)
+
+        # 3. Prediction Engine Outputs
+        prediction_engine_outputs_input: Optional[PredictionEngineInput] = None
+        try:
+            if self.prediction_engine:
+                # Assuming PricePredictor has a method get_formatted_predictions_for_agent
+                # or we adapt its current output here.
+                # For now, let's assume a simplified structure or placeholder
+                raw_predictions = await self.prediction_engine.predict_price_async(target_symbol) # Assuming it takes target_symbol
+                if raw_predictions and raw_predictions.predicted_price_4h is not None:
+                    price_pred = PricePrediction(
+                        target_price_min=raw_predictions.predicted_price_4h * 0.98, # Example
+                        target_price_max=raw_predictions.predicted_price_4h * 1.02, # Example
+                        prediction_period_hours=4,
+                        confidence=raw_predictions.confidence, # Assuming predictor gives this
+                        model_name=raw_predictions.model_name
+                    )
+                    prediction_engine_outputs_input = PredictionEngineInput(price_prediction_4h=price_pred)
+                # TODO: Populate market_regime_1h and sentiment_analysis if PredictionEngine provides them
+        except Exception as e:
+            logger.error(f"Error gathering prediction engine outputs for AIAgent: {e}", exc_info=True)
+
+        # 4. Risk Manager Inputs
+        risk_manager_inputs_model: Optional[RiskManagerInput] = None
+        try:
+            # RiskManager might need the target_symbol to give context-specific risk advice, or it provides general limits.
+            # Let's assume it provides general limits for now.
+            # Ensure portfolio value is up-to-date in RiskManager before these calls.
+            # This was handled in _initialize_async_dependencies and should be updated periodically.
+            await self.portfolio_manager.update_portfolio_value() # Ensure portfolio value is fresh
+            current_portfolio_value = self.portfolio_manager.total_portfolio_value_usd
+            self.risk_manager.update_current_portfolio_value(current_portfolio_value)
+
+            max_trade_size_usd = self.risk_manager.calculate_max_trade_size_usd(target_symbol) # target_symbol might be optional
+            available_capital = self.portfolio_manager.get_available_cash_usdc() # USDC assumed
+
+            risk_manager_inputs_model = RiskManagerInput(
+                max_exposure_per_trade_percentage=self.config.MAX_PORTFOLIO_EXPOSURE_PER_TRADE, # From global config
+                current_portfolio_value_usd=current_portfolio_value,
+                available_capital_usdc=available_capital,
+                max_trade_size_usd=max_trade_size_usd,
+                overall_portfolio_risk_level=self.risk_manager.get_overall_portfolio_risk_level() # Example method
+            )
+        except Exception as e:
+            logger.error(f"Error gathering risk manager inputs for AIAgent: {e}", exc_info=True)
+        
+        if not risk_manager_inputs_model:
+            logger.warning("Critical risk manager inputs missing for AIAgent. Skipping decision.")
+            return None
+
+        # 5. Portfolio Manager Inputs
+        portfolio_manager_inputs_model: Optional[PortfolioManagerInput] = None
+        try:
+            active_positions_raw = await self.portfolio_manager.get_active_trades() # Assuming this gets current positions
+            pydantic_positions = []
+            if active_positions_raw:
+                for pos_dict in active_positions_raw:
+                    # This needs current price for the asset to calculate current_value_usd and PNL
+                    # Assuming PortfolioManager handles this or we fetch it here.
+                    # For simplicity, we'll use entry price as current if not available.
+                    current_asset_price = pos_dict.get('current_price_usd', pos_dict['entry_price_usd'])
+                    amount_tokens = pos_dict['amount_input_token']
+                    entry_price_usd = pos_dict['entry_price_usd']
+                    current_value_usd = amount_tokens * current_asset_price
+                    unrealized_pnl_usd = (current_asset_price - entry_price_usd) * amount_tokens
+                    unrealized_pnl_percentage = ((current_asset_price - entry_price_usd) / entry_price_usd) * 100 if entry_price_usd else 0
+
+                    pydantic_positions.append(PortfolioPositionInput(
+                        symbol=pos_dict['token_pair'],
+                        amount_tokens=amount_tokens,
+                        entry_price_usd=entry_price_usd,
+                        current_price_usd=current_asset_price,
+                        current_value_usd=current_value_usd,
+                        unrealized_pnl_usd=unrealized_pnl_usd,
+                        unrealized_pnl_percentage=unrealized_pnl_percentage
+                    ))
+            
+            realized_pnl_24h = await self.portfolio_manager.get_realized_pnl_last_24h()
+
+            portfolio_manager_inputs_model = PortfolioManagerInput(
+                current_positions=pydantic_positions if pydantic_positions else None,
+                total_pnl_realized_24h_usd=realized_pnl_24h
+            )
+        except Exception as e:
+            logger.error(f"Error gathering portfolio manager inputs for AIAgent: {e}", exc_info=True)
+
+        if not portfolio_manager_inputs_model:
+            logger.warning("Critical portfolio manager inputs missing for AIAgent. Skipping decision.")
+            return None
+
+        # 6. Security Checker Inputs
+        security_checker_inputs_model: Optional[SecurityCheckerInput] = None
+        try:
+            # Assuming SecurityChecker has a method to get combined score and alerts for a token
+            security_info = await self.security_checker.check_token_security_async(target_mint)
+            if security_info and security_info.get('score') is not None:
+                alerts = []
+                if security_info.get('alerts'): # Assuming alerts is a list of dicts
+                    for alert_dict in security_info['alerts']:
+                        alerts.append(TokenSecurityRisk(**alert_dict)) # Validate with Pydantic model
+                
+                security_checker_inputs_model = SecurityCheckerInput(
+                    target_token_symbol=target_symbol,
+                    target_token_security_score=security_info['score'],
+                    target_token_recent_security_alerts=alerts if alerts else None
+                )
+        except Exception as e:
+            logger.error(f"Error gathering security checker inputs for AIAgent: {e}", exc_info=True)
+        
+        # Assemble final AggregatedInputs
+        try:
+            aggregated_inputs = AggregatedInputs(
+                request_id=request_id,
+                timestamp_utc=timestamp_utc,
+                target_pair=target_pair_info,
+                market_data=market_data_input, # Already validated as non-None
+                signal_sources=signal_sources_inputs,
+                prediction_engine_outputs=prediction_engine_outputs_input,
+                risk_manager_inputs=risk_manager_inputs_model, # Already validated as non-None
+                portfolio_manager_inputs=portfolio_manager_inputs_model, # Already validated as non-None
+                security_checker_inputs=security_checker_inputs_model
+            )
+            logger.info(f"Successfully gathered inputs for AIAgent (request_id: {request_id}).")
+            return aggregated_inputs
+        except Exception as e: # Catch Pydantic validation errors or other issues
+            logger.critical(f"Failed to assemble final AggregatedInputs for AIAgent (request_id: {request_id}): {e}", exc_info=True)
+            return None
 
     async def _run_cycle(self):
+        """Exécute un cycle complet de logique de trading."""
         try:
-            # Update portfolio value at the start of the cycle for general monitoring
-            current_portfolio_val = await self.portfolio_manager.get_total_portfolio_value()
-            self.risk_manager.update_portfolio_value(current_portfolio_val)
-            self.performance_monitor.track_portfolio_value(current_portfolio_val)
-            logger.info(f"Current estimated portfolio value: ${current_portfolio_val:.2f}")
-        except Exception as e:
-            logger.error(f"Error updating portfolio value for cycle: {e}", exc_info=True)
-            # Not raising here, as the bot might still function or attempt recovery
-
-        # Determine target pair for this cycle
-        # For now, use a primary pair from config. Can be expanded to loop through multiple pairs.
-        primary_pair_str = self.config.PRIMARY_TRADING_PAIR_SYMBOLS
-        if not primary_pair_str:
-            logger.warning("PRIMARY_TRADING_PAIR_SYMBOLS not set in config. DexBot cannot select a target pair.")
-            return
-
-        target_pair_details = await self._get_target_pair_mints(primary_pair_str)
-        if not target_pair_details:
-            logger.error(f"Could not resolve mints for primary trading pair '{primary_pair_str}'. Skipping cycle.")
-            return
-        
-        target_symbol, base_symbol_for_pair, target_mint, base_mint_for_pair = target_pair_details
-        logger.info(f"Processing cycle for target pair: {target_symbol}/{base_symbol_for_pair} ({target_mint}/{base_mint_for_pair})")
-
-        aggregated_inputs: Optional[Dict[str, Any]] = None
-        try:
-            aggregated_inputs = await self._gather_ai_agent_inputs(target_symbol, target_mint, base_mint_for_pair, base_symbol_for_pair)
-        except DataCollectionError as dce:
-            logger.error(f"Data collection failed for {target_symbol}, cannot proceed with AI decision: {dce}")
-            return # Skip AI decision and execution if critical data is missing
-        except Exception as e:
-            logger.critical(f"Unexpected error during input gathering for {target_symbol}: {e}", exc_info=True)
-            return # Safety stop for this cycle
-
-        if not aggregated_inputs:
-            logger.warning(f"No aggregated inputs gathered for {target_symbol}. Skipping AI decision.")
-            return
-
-        # Log aggregated inputs (or a summary for brevity)
-        # logger.debug(f"Aggregated inputs for AIAgent ({target_symbol}): {json.dumps(aggregated_inputs, indent=2, default=str)}")
-        # For production, consider logging to a separate file or a structured logging system if too verbose.
-        logger.info(f"Sending inputs for {target_symbol} to AIAgent.")
-
-        ai_decision_response: Optional[Dict[str, Any]] = None
-        try:
-            # ai_decision_response is the raw output dict from AIAgent.decide_trade
-            ai_decision_response = await self.ai_agent.decide_trade(aggregated_inputs)
-        except Exception as e:
-            logger.error(f"Error during AIAgent.decide_trade for {target_symbol}: {e}", exc_info=True)
-            # Continue, maybe log the failure and do not trade
-
-        if not ai_decision_response:
-            logger.warning(f"AIAgent returned no decision for {target_symbol}.")
-            return
-
-        logger.info(f"AIAgent decision for {target_symbol}: {ai_decision_response.get('decision')}, AmountUSD: {ai_decision_response.get('amount_usd')}, Confidence: {ai_decision_response.get('confidence')}")
-        logger.debug(f"AIAgent full response for {target_symbol}: {json.dumps(ai_decision_response, indent=2, default=str)}")
-
-        # Execute trade if decision is not HOLD and essential fields are present
-        if ai_decision_response.get('decision') and ai_decision_response.get('decision').upper() != 'HOLD':
-            # TradeExecutor expects a specific format from agent_order, which ai_decision_response should match
-            # as defined in 02-todo-ai-api-gemini.md (output of Task 3.3)
-            # Ensure `token_pair` is in "SYMBOL/SYMBOL" format for TradeExecutor if it internally parses it,
-            # or pass mints directly if TradeExecutor is adapted. Our TradeExecutor now parses "SYMBOL/SYMBOL".
-            # The ai_decision_response already contains `token_pair` as per spec.
-            
-            required_fields = ['decision', 'token_pair', 'amount_usd'] # Confidence, SL/TP are optional for execution
-            if not all(field in ai_decision_response and ai_decision_response[field] is not None for field in required_fields):
-                logger.error(f"AIAgent decision for {target_symbol} is missing required fields for execution. Decision: {ai_decision_response}")
+            # 0. Determine target pair for this cycle (using config for now)
+            target_pair_info_tuple = await self._get_target_pair_mints(self.config.TARGET_TRADING_PAIR)
+            if not target_pair_info_tuple:
+                logger.error(f"Could not get mint info for target pair {self.config.TARGET_TRADING_PAIR}. Skipping cycle.")
                 return
             
-            if ai_decision_response['token_pair'].upper() != primary_pair_str.upper():
-                 logger.warning(f"AIAgent returned decision for pair '{ai_decision_response['token_pair']}' which does not match current cycle target '{primary_pair_str}'. This might be valid if agent can suggest other pairs, but for now, aligning execution. Check agent's prompt and capabilities.")
-                 # For now, we will proceed if the agent specified a pair, assuming it knows what it's doing.
-                 # But it highlights a point of control/validation.
+            target_symbol, target_mint, base_mint_for_pair, base_symbol_for_pair = target_pair_info_tuple
+            current_pair_symbol_str = f"{target_symbol}/{base_symbol_for_pair}"
+            logger.info(f"Processing cycle for pair: {current_pair_symbol_str}")
 
-            logger.info(f"Transmitting AI order for {ai_decision_response['token_pair']} to TradeExecutor: {ai_decision_response.get('decision')} amount ${ai_decision_response.get('amount_usd')}")
+            # 1. Gather all inputs for the AIAgent
+            # This step now returns a Pydantic model instance or None
+            aggregated_inputs_model: Optional[AggregatedInputs] = await self._gather_ai_agent_inputs(
+                target_symbol, target_mint, base_mint_for_pair, base_symbol_for_pair
+            )
+
+            if not aggregated_inputs_model:
+                logger.warning(f"Failed to gather complete inputs for AIAgent for pair {current_pair_symbol_str}. Skipping AI decision.")
+                # Potential: notify UI, increment error counter, etc.
+                return
+
+            # 2. Get decision from AIAgent
+            # AIAgent.decide_trade now expects an AggregatedInputs object
+            ai_decision_dict = await self.ai_agent.decide_trade(aggregated_inputs_model)
+
+            # Log the AI's decision and reasoning (regardless of action)
             try:
-                trade_successful = await self.trade_executor.execute_agent_order(ai_decision_response)
-                if trade_successful:
-                    logger.info(f"Trade based on AI decision for {ai_decision_response['token_pair']} submitted successfully by TradeExecutor.")
+                decision_log_payload = {
+                    "timestamp_utc": datetime.utcnow().isoformat(),
+                    "request_id": aggregated_inputs_model.request_id, # Use the one from inputs
+                    "target_pair": current_pair_symbol_str,
+                    "decision": ai_decision_dict.get("decision"),
+                    "amount_usd": ai_decision_dict.get("amount_usd"),
+                    "confidence": ai_decision_dict.get("confidence"),
+                    "stop_loss_price": ai_decision_dict.get("stop_loss_price"),
+                    "take_profit_price": ai_decision_dict.get("take_profit_price"),
+                    "reasoning": ai_decision_dict.get("reasoning"),
+                    "gemini_usage_metadata": ai_decision_dict.get("usage_metadata") # If AIAgent adds this
+                }
+                # TODO: Persist this to a dedicated ai_decisions table in the database
+                logger.info(f"AIAgent Decision Log: {json.dumps(decision_log_payload)}")
+            except Exception as log_e:
+                logger.error(f"Error logging AI agent decision: {log_e}", exc_info=True)
+
+            # 3. Execute trade if BUY or SELL decision
+            if ai_decision_dict and ai_decision_dict.get("decision") in ["BUY", "SELL"]:
+                logger.info(f"AIAgent decided to {ai_decision_dict['decision']} {current_pair_symbol_str}. Attempting execution.")
+                
+                # Pass the entire decision dictionary to TradeExecutor
+                # TradeExecutor.execute_agent_order will extract necessary fields
+                # and perform further checks (e.g., amount_usd is not None).
+                trade_result = await self.trade_executor.execute_agent_order(ai_decision_dict)
+                
+                if trade_result['success']:
+                    logger.info(f"Trade executed successfully for {current_pair_symbol_str}. Signature: {trade_result.get('signature')}")
+                    self.performance_monitor.track_trade(trade_result.get('pnl_usd', 0), True) # Assuming PNL is part of result
                 else:
-                    logger.error(f"Trade based on AI decision for {ai_decision_response['token_pair']} failed or was aborted by TradeExecutor.")
-            except Exception as e:
-                logger.critical(f"Critical error during TradeExecutor.execute_agent_order for {ai_decision_response['token_pair']}: {e}", exc_info=True)
-        else:
-            logger.info(f"AIAgent decision is HOLD or no valid action for {target_symbol}. No trade executed.")
+                    logger.error(f"Trade execution failed for {current_pair_symbol_str}: {trade_result.get('error')}. Details: {trade_result.get('details')}")
+                    self.performance_monitor.track_trade(0, False)
+            elif ai_decision_dict and ai_decision_dict.get("decision") == "HOLD":
+                logger.info(f"AIAgent decided to HOLD for {current_pair_symbol_str}. Reasoning: {ai_decision_dict.get('reasoning')}")
+            else:
+                logger.warning(f"AIAgent returned an invalid or no decision for {current_pair_symbol_str}: {ai_decision_dict}")
+
+            # 4. Update portfolio value for RiskManager and PerformanceMonitor after potential trade
+            current_portfolio_value = await self.portfolio_manager.get_total_portfolio_value()
+            self.risk_manager.update_current_portfolio_value(current_portfolio_value)
+            self.performance_monitor.track_portfolio_value(current_portfolio_value)
+            logger.debug(f"Portfolio value updated post-cycle: ${current_portfolio_value:.2f}")
+
+        except DataCollectionError as dce: # Specific error for data gathering issues
+            logger.error(f"Data collection error in DexBot cycle: {dce}", exc_info=True)
+            # Potentially pause bot or increase sleep interval on repeated errors
+        except NumerusXBaseError as nxe: # Catch custom app errors
+            logger.error(f"NumerusX specific error in DexBot cycle: {nxe}", exc_info=True)
+        except asyncio.CancelledError:
+            logger.info("DexBot cycle was cancelled.")
+            raise # Re-raise to be caught by the run method's handler
+        except Exception as e:
+            logger.critical(f"Unexpected critical error in DexBot cycle: {e}", exc_info=True)
+            # This might indicate a need to stop the bot if errors persist
+            # For now, it will log and the main_loop will attempt to continue after sleep
+            
+    async def _get_market_data_for_pair(self, target_symbol: str, base_symbol: str, target_mint: str, base_mint: str) -> Dict[str, Any]:
+        """Helper to fetch and structure market data for a given pair."""
+        # This method might be deprecated or simplified if _gather_ai_agent_inputs handles all data directly.
+        # For now, keeping it as a potential internal helper for specific data points if needed elsewhere.
+        pair_data = {}
+        try:
+            price_info = await self.market_data_provider.get_token_price(target_mint, base_mint)
+            if price_info['success']:
+                pair_data['price'] = price_info['data']['price']
+            else:
+                logger.warning(f"Could not fetch price for {target_symbol}/{base_symbol}: {price_info.get('error')}")
+                pair_data['price'] = None
+            
+            # Add more data points as needed: volume, liquidity, indicators etc.
+            # Example for volume (assuming a method in MarketDataProvider exists or is added)
+            # volume_info = await self.market_data_provider.get_volume_24h(f"{target_symbol}/{base_symbol}")
+            # if volume_info['success']:
+            #     pair_data['volume_24h'] = volume_info['data']['volume_usd']
+
+        except Exception as e:
+            logger.error(f"Error fetching market data for {target_symbol}/{base_symbol}: {e}", exc_info=True)
+            # Ensure basic structure even on error
+            if 'price' not in pair_data: pair_data['price'] = None
+        return pair_data
 
     def stop(self):
+        """Arrête le bot de trading de manière propre."""
         if not self.active:
             logger.info("DexBot is not running.")
             return
-            
+        
         self.active = False
-        logger.info("Stopping DexBot...")
-        if self.main_loop_task and not self.main_loop_task.done():
+        if self.main_loop_task:
             self.main_loop_task.cancel()
-            logger.info("Main loop cancellation requested.")
-        else:
-            logger.info("Main loop task was not running or already completed.")
-        # Further cleanup (like closing client sessions) is handled by async context managers' __aexit__
+            # await self.main_loop_task # Wait for it to actually cancel, handle exceptions
+        logger.info("DexBot has been signaled to stop.")
 
     async def close(self):
-        """Explicitly closes resources if needed, supplementing __aexit__ from context managers."""
-        logger.info("DexBot close() called. Resources should be managed by context managers mostly.")
-        # JupiterApiClient, MarketDataProvider, TradingEngine have __aexit__
+        """Ferme proprement toutes les connexions et ressources."""
+        logger.info("Closing DexBot resources...")
+        if self.active or self.main_loop_task:
+            self.stop()
+            # Give a bit of time for the loop to cancel if it hasn't already been awaited
+            if self.main_loop_task and not self.main_loop_task.done():
+                try:
+                    await asyncio.wait_for(self.main_loop_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Timeout waiting for main loop to finish during close.")
+                except asyncio.CancelledError:
+                    pass # Expected
 
-# Example of how DexBot might be run (e.g., in app/main.py or a run script)
+        # Close JupiterApiClient (which closes Solana AsyncClient)
+        # Already handled by async with in run() method if it exits cleanly.
+        # Explicit call here is for cases where run() might not have completed its context management.
+        # if self.jupiter_client:
+        #     await self.jupiter_client.close_async_client()
+        #     logger.info("JupiterApiClient closed.")
+
+        if self.market_data_provider:
+            await self.market_data_provider.close_session() # If MarketDataProvider has a session
+            logger.info("MarketDataProvider session closed.")
+            
+        # if self.trading_engine: # TradingEngine might also have resources to close
+        #     await self.trading_engine.close_resources() 
+        #     logger.info("TradingEngine resources closed.")
+
+        logger.info("DexBot closed.")
+
 async def main():
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    # Load configuration
+    config = Config()
+    
+    # Configure logging (basic example)
+    log_level = logging.DEBUG if config.DEBUG_MODE else logging.INFO
+    logging.basicConfig(level=log_level, 
+                        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                        handlers=[logging.StreamHandler()]) # Add file handler for production
+
+    logger.info("Starting NumerusX DexBot application...")
     bot = DexBot()
     try:
         await bot.run()
-    except RuntimeError as e:
-        logger.critical(f"Failed to start DexBot due to runtime error: {e}")
     except KeyboardInterrupt:
-        logger.info("DexBot run interrupted by user.")
+        logger.info("DexBot run interrupted by user (KeyboardInterrupt).")
+    except RuntimeError as e:
+        logger.critical(f"DexBot failed to start or run due to a runtime error: {e}", exc_info=True)
     finally:
-        logger.info("Shutting down DexBot...")
-        bot.stop() # Request stop
-        # Allow time for cancellation to propagate and __aexit__ methods to run
-        # In a real app, you might await a bot.wait_for_shutdown() method
-        if bot.main_loop_task:
-            try:
-                await asyncio.wait_for(bot.main_loop_task, timeout=5.0) 
-            except asyncio.TimeoutError:
-                logger.warning("Timeout waiting for main loop to cleanly shut down.")
-            except asyncio.CancelledError: # Expected if stop() worked
-                pass
-        await bot.close() # Final explicit cleanup
-        logger.info("DexBot shutdown complete.")
+        logger.info("DexBot shutting down...")
+        await bot.close()
+        logger.info("DexBot has shut down.")
 
-if __name__ == '__main__':
-    # This is for basic testing of DexBot initialization and run/stop.
-    # In a real application, DexBot would be managed by a higher-level application structure.
+if __name__ == "__main__":
     asyncio.run(main())

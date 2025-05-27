@@ -198,7 +198,16 @@ class Config:
     # Configuration de base de données
     DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{os.path.join('data', 'numerusx.db')}")
     DB_PATH = os.getenv("DB_PATH", os.path.join("data", "numerusx.db"))
-    
+
+    # Configuration Redis
+    REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD") # Optionnel, peut être None
+    REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+    # Construction de REDIS_URL pour compatibilité avec certaines bibliothèques (ex: Celery, FastAPI-Limiter)
+    _redis_password_part = f":{REDIS_PASSWORD}@" if REDIS_PASSWORD else ""
+    REDIS_URL = os.getenv("REDIS_URL", f"redis://{_redis_password_part}{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}")
+
     # Configuration Solana
     SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
     SOLANA_NETWORK = os.getenv("SOLANA_NETWORK", "mainnet-beta")
@@ -305,6 +314,10 @@ class Config:
     # Configuration for Gemini Cost Calculation (Instruction 7 from review)
     GEMINI_INPUT_COST_PER_MILLION_TOKENS = float(os.getenv("GEMINI_INPUT_COST_PER_MILLION_TOKENS", "0.35")) # Example for Flash model, adjust as needed
     GEMINI_OUTPUT_COST_PER_MILLION_TOKENS = float(os.getenv("GEMINI_OUTPUT_COST_PER_MILLION_TOKENS", "1.05")) # Example for Flash model, adjust as needed
+
+    # Configuration for Gemini Prompt Construction (Token Optimization - Tâche 3.2.5)
+    GEMINI_PROMPT_MAX_OHLCV_CANDLES = int(os.getenv("GEMINI_PROMPT_MAX_OHLCV_CANDLES", "12")) # Max recent OHLCV candles to include
+    GEMINI_PROMPT_MAX_SIGNAL_SOURCES = int(os.getenv("GEMINI_PROMPT_MAX_SIGNAL_SOURCES", "3")) # Max signal sources to include (prioritized)
 
     # Configuration des Stratégies
     DEFAULT_STRATEGY_NAME = os.getenv("DEFAULT_STRATEGY_NAME", AdvancedTradingStrategy().get_name()) # Default to AdvancedTradingStrategy

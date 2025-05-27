@@ -18,7 +18,7 @@
     - [ ] Mettre à jour `todo/02-todo-ai-api-gemini.md` pour refléter cette version de manière cohérente (Vérifié, déjà fait).
     - [ ] Vérifier la compatibilité de la version de `google-generativeai` dans `requirements.txt` avec le modèle Gemini choisi.
 
--   [x] **1.1. `app/config.py` (Jupiter API v6)**
+-   [x] **1.1.0 `app/config.py` (Jupiter API v6)**
     -   [x] Ajouter les nouveaux hostnames de l'API Jupiter v6 (`JUPITER_LITE_API_HOSTNAME`, `JUPITER_PRO_API_HOSTNAME`).
     -   [x] Ajouter les nouveaux chemins d'API pour `swap`, `price`, `tokens`, `trigger`, `recurring` (`JUPITER_SWAP_API_PATH`, etc.).
     -   [x] Ajouter les paramètres de transaction Jupiter (slippage, compute units, priority fees, etc. : `JUPITER_DEFAULT_SLIPPAGE_BPS`, `JUPITER_DYNAMIC_COMPUTE_UNIT_LIMIT`, `JUPITER_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS`, `JUPITER_PRIORITY_FEE_LEVEL`, `JUPITER_WRAP_AND_UNWRAP_SOL`, `JUPITER_ONLY_DIRECT_ROUTES`, `JUPITER_RESTRICT_INTERMEDIATE_TOKENS`, `JUPITER_SWAP_MODE`).
@@ -27,8 +27,8 @@
     -   [x] `JUPITER_MAX_RETRIES` pour `JupiterApiClient`.
 
 -   [x] **1.1.5. Configuration Redis**
-    -   [ ] Ajouter REDIS_URL à app/config.py
-    -   [ ] Ajouter REDIS_PASSWORD si nécessaire
+    -   [x] Ajouter REDIS_URL à app/config.py
+    -   [x] Ajouter REDIS_PASSWORD si nécessaire
     -   [ ] Documenter l'utilisation de Redis dans le README.md
 
 -   [x] **1.1.bis. `requirements.txt`**
@@ -275,8 +275,8 @@
 -   [ ] **1.14. Documentation et Configuration de Redis (Nouveau)**
     -   [ ] **Objectif**: Documenter l'utilisation de Redis et s'assurer que sa configuration est gérée.
     -   [ ] **Détails**:
-        -   [ ] **`README.md`**: Vérifier que Redis est mentionné dans la section architecture et le diagramme (Vérifié, déjà fait).
-        -   [ ] **`app/config.py`**: Ajouter les variables de configuration pour Redis (HÔTE, PORT, MOT_DE_PASSE si nécessaire, DB_INDEX) et les charger depuis `.env` (ex: `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`).
+        -   [x] **`README.md`**: Vérifier que Redis est mentionné dans la section architecture et le diagramme (Vérifié, déjà fait).
+        -   [x] **`app/config.py`**: Ajouter les variables de configuration pour Redis (HÔTE, PORT, MOT_DE_PASSE si nécessaire, DB_INDEX) et les charger depuis `.env` (ex: `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`).
         -   [ ] **Documentation Interne**: Créer ou mettre à jour un document (ex: `docs/redis_usage.md` ou section dans `0-architecte.md`) expliquant à quoi sert Redis dans le projet. Cas d'usage potentiels à documenter/confirmer : cache pour `MarketDataProvider` (ex: prix tokens, infos tokens), cache pour `JupiterApiClient` (ex: quotes récentes), gestion des sessions utilisateur pour l'UI React (si authentification stateful backend), rate limiting pour l'API FastAPI, buffer temporaire pour les logs avant écriture en base de données, ou comme broker pour une file de tâches simple avec Celery (si envisagé).
         -   [ ] **Code**: S'assurer que tout code utilisant Redis (ex: `MarketDataProvider`, `FastAPI` pour les sessions/cache, `SocketManager` pour la scalabilité inter-processus si architecture multi-worker) utilise les configurations de `app/config.py` et gère correctement les connexions.
 

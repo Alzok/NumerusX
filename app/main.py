@@ -8,23 +8,69 @@ import os
 # from app.gui import TradingDashboard 
 from logging.handlers import RotatingFileHandler
 
-from fastapi import FastAPI, Security, Request # Added Security, Request
+from fastapi import FastAPI, Security, Request, Depends # Added Security, Request, Depends
 import socketio # Added socketio
 from fastapi.responses import JSONResponse # Added JSONResponse
 from pydantic import BaseModel, Field # Added BaseModel, Field
 from typing import List, Optional # Added List, Optional
 from fastapi.staticfiles import StaticFiles # Added StaticFiles
 from fastapi.templating import Jinja2Templates # Added Jinja2Templates (optional, for serving index.html)
+from fastapi.middleware.cors import CORSMiddleware # Added CORSMiddleware
 
 from app.dex_bot import DexBot # Keep for now, might be used by API later
 from app.config import Config
 from app.logger import DexLogger # DexLogger might be obsolete if configure_logging is used
 from app.utils.auth import VerifyToken, AuthError # Import VerifyToken and AuthError
+from app.socket_manager import get_socket_manager # Import the new socket manager
+
+from fastapi_limiter import FastAPILimiter # Import FastAPILimiter
+from fastapi_limiter.depends import RateLimiter # Import RateLimiter dependency
+import redis.asyncio as redis # Import async redis for limiter
 
 # Global instances
 app = FastAPI(title="NumerusX Backend", version="1.0.0")
-sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins=Config.CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"]) # Adjust CORS as needed
-socket_app = socketio.ASGIApp(sio, other_asgi_app=app)
+
+# Add CORSMiddleware to the FastAPI app instance
+# Ensure Config.CORS_ALLOWED_ORIGINS is defined and loaded correctly in your Config class.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=Config.CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"],
+    allow_credentials=True,
+    allow_methods=["*"], # Allows all methods
+    allow_headers=["*"], # Allows all headers
+)
+
+# Initialize SocketManager and get the app and server instance
+cors_origins = Config.CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"]
+socket_man = get_socket_manager(cors_allowed_origins=cors_origins)
+sio = socket_man.sio # This is the socketio.AsyncServer instance
+# Mount the Socket.IO app. The SocketManager's app is already configured.
+# We need to ensure it's mounted correctly with the FastAPI app.
+# The original socket_app = socketio.ASGIApp(sio, other_asgi_app=app) is effectively what socket_man.app should be, 
+# but socket_man.app should already have `app` as its `other_asgi_app` if we make a small change to SocketManager or how it's used.
+# For now, let's assume socket_man.app is the main ASGI app for Socket.IO and FastAPI is mounted as a sub-app or vice-versa.
+# The simplest integration is to mount the SocketManager's ASGIApp (which includes the FastAPI app if designed that way).
+# Let's adjust main.py to use the SocketManager's app as the primary entry for Uvicorn, or mount it under FastAPI.
+
+# If SocketManager.app is just the socketio.ASGIApp without FastAPI, then:
+# app.mount("/ws", socket_man.app) # Mounts socket.io at /ws path
+# And uvicorn would run `app` (FastAPI instance).
+
+# If SocketManager.app is socketio.ASGIApp(sio_server, other_asgi_app=fast_api_instance),
+# then we need to ensure this is done correctly. The current SocketManager does:
+# SocketManager._sio_app = socketio.ASGIApp(SocketManager._sio_server)
+# This means it does NOT include FastAPI yet. We need to attach FastAPI to it.
+
+if socket_man.app:
+    # Re-wrap the SocketManager's pure ASGI app with FastAPI as the fallback
+    # This makes FastAPI handle all non-Socket.IO requests.
+    # The `app` (FastAPI instance) becomes the `other_asgi_app`.
+    final_asgi_app = socketio.ASGIApp(sio, other_asgi_app=app)
+else:
+    # Fallback if socket_man.app is None, though get_socket_manager should always return one.
+    logging.critical("SocketManager app is None, WebSocket functionality will be unavailable.")
+    final_asgi_app = app # Run FastAPI without Socket.IO
+
 auth_verifier = VerifyToken() # Initialize the token verifier
 
 # Mount static files for React UI (conditional or for development)
@@ -219,6 +265,15 @@ async def startup_event():
     # app.state.dex_bot = global_dex_bot # Make it accessible in request handlers
     # logging.info("DexBot initialized and available at app.state.dex_bot")
 
+    # Initialize Redis for FastAPI-Limiter
+    try:
+        # Use Config.REDIS_URL which should be correctly formatted
+        redis_connection = redis.from_url(Config.REDIS_URL, encoding="utf-8", decode_responses=True)
+        await FastAPILimiter.init(redis_connection)
+        logging.info(f"FastAPI-Limiter initialized with Redis: {Config.REDIS_URL}")
+    except Exception as e:
+        logging.error(f"Failed to initialize FastAPI-Limiter with Redis: {e}. Rate limiting will not work.", exc_info=True)
+
 
 async def shutdown_event():
     """Actions to perform on application shutdown."""
@@ -257,70 +312,29 @@ async def auth_exception_handler(request: Request, exc: AuthError):
 # Basic root endpoint
 @app.get("/")
 async def root():
-    return {"message": "Welcome to NumerusX API"}
+    return {"message": "Welcome to NumerusX Backend API"}
 
-# Socket.IO example events (will be expanded)
-@sio.event
-async def connect(sid, environ, auth_data=None):
-    logging.info(f"Socket.IO client connection attempt: {sid}, environ: {environ}")
-    # auth_data is optionally passed by the client during connection:
-    # client.connect(url, auth={'token': 'my_jwt_token'})
-    if auth_data and 'token' in auth_data:
-        token = auth_data['token']
-        logging.debug(f"Auth data received from client {sid}: {auth_data}")
-        try:
-            # Use a non-Security wrapped version or adapt verify for this context
-            # For simplicity, let's assume a synchronous check or a helper from auth_verifier
-            # This is a simplified example. In a real scenario, you might need to adapt
-            # the auth_verifier.verify method or create a specific one for socket auth
-            # as it's not going through the standard FastAPI Depends/Security flow here.
-            
-            # Re-instantiate or use a method that doesn't rely on FastAPI's Depends for socket
-            # For now, let's simulate a direct verification if possible or conceptualize it.
-            # This is a conceptual placeholder for token validation.
-            # payload = await auth_verifier.verify_socket_token(token) # Hypothetical method
-            # For a quick test, one might decode it simply, but production needs full verification.
-            
-            # Placeholder: Simulate token validation for Socket.IO
-            # In a real implementation, properly validate the token here using auth_verifier logic
-            # This might involve creating a separate method in VerifyToken not reliant on FastAPI's `Depends`
-            # or by adapting the existing one. For now, we assume if a token is present, it's valid for this example.
-            if token.startswith("valid_jwt_prefix_"): # Replace with actual validation
-                logging.info(f"Socket.IO client {sid} authenticated with token.")
-                await sio.emit('message', {'data': 'Authenticated & Connected to NumerusX Socket.IO!'}, room=sid)
-            else:
-                logging.warning(f"Socket.IO client {sid} provided an invalid token. Disconnecting.")
-                await sio.disconnect(sid)
-                return False # Deny connection
+# Default Socket.IO event handlers (can be moved to SocketManager or kept here if specific to main app logic)
+# Note: SocketManager already registers connect and disconnect. If kept here, they might override or be duplicated.
+# It's cleaner to have them in SocketManager. Removing from here if they are in SocketManager.
 
-        except AuthError as e: # Catch custom AuthError
-            logging.warning(f"Socket.IO AuthError for {sid}: {e.error_detail}. Disconnecting.")
-            # Optionally emit an error message to the client before disconnecting
-            # await sio.emit('auth_error', {'error': e.error_detail}, room=sid)
-            await sio.disconnect(sid)
-            return False # Deny connection
-        except Exception as e:
-            logging.error(f"Socket.IO unexpected error during auth for {sid}: {e}. Disconnecting.", exc_info=True)
-            await sio.disconnect(sid)
-            return False # Deny connection
-    else:
-        logging.warning(f"Socket.IO client {sid} did not provide auth token. Disconnecting.")
-        # Depending on policy, you might allow unauthenticated connections for certain namespaces/events
-        # For now, strict: require token.
-        await sio.disconnect(sid)
-        return False # Deny connection
-    
-    logging.info(f"Socket.IO client connected and authenticated: {sid}")
-    # Standard emit after successful connection and auth (if not done above)
-    # await sio.emit('message', {'data': 'Connected to NumerusX Socket.IO!'}, room=sid)
+# @sio.event
+# async def connect(sid, environ, auth_data=None):
+#     logging.info(f'Socket.IO client connected: {sid}')
+#     # TODO: Authentication logic for socket connection using auth_data (e.g., JWT token)
+#     # if not auth_data or not auth_data.get('token') or not auth_verifier.verify_socket_token(auth_data.get('token')):
+#     #     logging.warning(f"Socket.IO connection attempt by {sid} rejected due to invalid auth.")
+#     #     raise socketio.exceptions.ConnectionRefusedError('Authentication failed!')
+#     # logging.info(f"Socket.IO client {sid} authenticated successfully.")
+#     await sio.emit('response', {'data': 'Connected to NumerusX Socket.IO'}, room=sid)
 
-@sio.event
-async def disconnect(sid):
-    logging.info(f"Socket.IO client disconnected: {sid}")
+# @sio.event
+# async def disconnect(sid):
+#     logging.info(f'Socket.IO client disconnected: {sid}')
 
 @sio.event
 async def chat_message(sid, data):
-    logging.info(f"Socket.IO message from {sid}: {data}")
+    logging.info(f'Socket.IO message from {sid}: {data}')
     await sio.emit('chat_message', data, room=sid) # Echo back for now
 
 # Protected API endpoint example
@@ -331,51 +345,70 @@ async def private_route(payload: dict = Security(auth_verifier.verify)):
     return {"message": "Hello from a private endpoint! You are authenticated.", "user_info": payload}
 
 # Public API endpoint example (no auth needed)
-@app.get("/api/v1/public")
+@app.get("/api/v1/public", dependencies=[Depends(RateLimiter(times=10, seconds=60))]) # Example global limit
 async def public_route():
-    return {"message": "Hello from a public endpoint! No authentication required."}
+    return {"message": "This is a public route!"}
 
-# Configuration Endpoints
+# Define a list of configuration keys that are safe and useful for UI interaction
+# Descriptions are optional but helpful for UI rendering.
+UI_CONFIGURABLE_KEYS = {
+    "TARGET_TRADING_PAIR": "The main trading pair symbol (e.g., SOL/USDC).",
+    "TRADING_UPDATE_INTERVAL_SECONDS": "Frequency of trading cycles in seconds.",
+    "MAX_PORTFOLIO_EXPOSURE_PER_TRADE": "Maximum percentage of portfolio to risk per trade (e.g., 0.01 for 1%).",
+    "TRADE_CONFIDENCE_THRESHOLD": "Minimum AI confidence level to execute a trade (0.0 to 1.0).",
+    "DEFAULT_STRATEGY_NAME": "Default strategy to use for generating signals for the AI Agent.",
+    "GEMINI_MODEL_NAME": "AI Model to use for decisions (read-only from UI perspective normally).",
+    # Add other relevant keys here, e.g., from RiskManager, PredictionEngine settings if applicable
+}
+
 @app.get("/api/v1/config", response_model=GetConfigResponse, dependencies=[Security(auth_verifier.verify)])
 async def get_bot_configuration():
-    """Retrieve a list of user-configurable bot parameters."""
-    # Expose only non-sensitive, configurable parameters
-    # Values are read directly from the Config class (which loads from .env)
-    configurable_params = [
-        ConfigurableParameter(key="LOG_LEVEL", value=str(Config.LOG_LEVEL), description="Logging level (e.g., INFO, DEBUG)"),
-        ConfigurableParameter(key="TRADING_UPDATE_INTERVAL_SECONDS", value=str(Config.TRADING_UPDATE_INTERVAL_SECONDS), description="Main trading cycle interval in seconds"),
-        ConfigurableParameter(key="DEFAULT_STRATEGY_NAME", value=str(Config.DEFAULT_STRATEGY_NAME), description="Default trading strategy to use"),
-        ConfigurableParameter(key="MAX_OPEN_POSITIONS", value=str(Config.MAX_OPEN_POSITIONS), description="Maximum number of concurrent open positions"),
-        ConfigurableParameter(key="MAX_ORDER_SIZE_USD", value=str(Config.MAX_ORDER_SIZE_USD), description="Maximum size for a single order in USD"),
-        # Add more configurable and non-sensitive parameters here
-    ]
+    """Retrieves a list of configurable parameters and their current values."""
+    params = []
+    config_instance = Config() # Get current config instance
+    for key, description in UI_CONFIGURABLE_KEYS.items():
+        value = getattr(config_instance, key, "N/A")
+        params.append(ConfigurableParameter(key=key, value=str(value), description=description))
+    
     return GetConfigResponse(
-        configurable_parameters=configurable_params,
-        info="These are some of the current bot configurations. Sensitive values are not exposed."
+        configurable_parameters=params,
+        info="Current bot configuration parameters. Some changes may require a bot restart."
     )
 
 @app.post("/api/v1/config", dependencies=[Security(auth_verifier.verify)])
 async def update_bot_configuration(config_update: UpdateConfigRequest):
-    """Update user-configurable bot parameters. Placeholder: Logs changes."""
-    logging.info(f"Received request to update configuration: {config_update.model_dump_json(indent=2)}")
-    
-    # Placeholder for actual update logic
-    # In a real application, you would:
-    # 1. Validate each key and value.
-    # 2. Update a user-specific config file (e.g., user_config.json) or .env (carefully!).
-    # 3. Potentially signal the bot or relevant modules to reload their configuration.
-    # For .env updates, libraries like `python-dotenv` (set_key, unset_key) can be used.
-    # Be extremely cautious when writing to .env files, especially in a deployed environment.
-    
+    """Updates specified bot configuration parameters."""
+    # IMPORTANT: Directly modifying os.environ or live Config object attributes is generally not recommended
+    # for a running application as it can lead to inconsistent state, especially with multiple workers.
+    # A robust solution involves:
+    # 1. Storing user overrides in a separate file (e.g., user_config.json) or database.
+    # 2. Having Config load these overrides at startup.
+    # 3. For live updates, either:
+    #    a) Signal the bot to re-initialize its Config (if designed for it).
+    #    b) For some parameters, components might be designed to fetch them live from a settings service.
+    #    c) Inform the user that a restart is needed for changes to take effect.
+
     updated_params_log = []
     for param in config_update.parameters_to_update:
-        logging.info(f"Attempting to update {param.key} to {param.value}")
-        # Example: if param.key == "LOG_LEVEL": Config.LOG_LEVEL = param.value (this only changes in-memory)
-        updated_params_log.append({"key": param.key, "new_value_attempted": param.value})
+        if param.key in UI_CONFIGURABLE_KEYS:
+            # This is symbolic. Actual update logic is complex.
+            # os.environ[param.key] = param.value # Example: NOT recommended for live updates
+            # setattr(Config, param.key, param.value) # Also NOT recommended directly on class or instance post-init
+            logging.info(f"Received request to update config: {param.key} = {param.value}. "
+                         f"(Note: Live update mechanism needs full implementation. Change may require restart.)")
+            updated_params_log.append(f"{param.key}={param.value}")
+        else:
+            logging.warning(f"Attempt to update non-UI-configurable parameter: {param.key}")
 
-    # Note: Simply changing Config attributes here won't persist them unless Config class handles saving.
-    # This is a simplified placeholder.
-    return {"message": "Configuration update request received. See logs for details. Actual persistence not yet implemented.", "updated_parameters_logged": updated_params_log}
+    if not updated_params_log:
+        return JSONResponse(status_code=400, content={"detail": "No valid parameters provided for update or parameters are not configurable."})
+
+    # Simulate broadcasting the config change to relevant components if they can handle it,
+    # or notify connected UI clients that a change was made.
+    if sio:
+        await sio.emit('config_updated', {'updated_keys': [p.split('=')[0] for p in updated_params_log], 'message': 'Configuration parameters were updated. Some changes might require a bot restart.'})
+
+    return {"message": f"Configuration update request processed for: {', '.join(updated_params_log)}. Restart may be required for some changes."}
 
 # Bot Control Endpoints
 @app.post("/api/v1/bot/start", response_model=BotActionResponse, dependencies=[Security(auth_verifier.verify)])

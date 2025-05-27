@@ -6,19 +6,19 @@
 - [x] Harmoniser l'état des tâches (revue des sections ajoutées et des stratégies clés effectuée)
 
 ## Phase 1: Infrastructure
-- [ ] Configuration de base (corrigée)
-- [ ] Jupiter API Client
-- [ ] Base de données (nouveau fichier TODO)
+- [x] Configuration de base (corrigée) (config Jupiter V6 et Redis ajoutée à `app/config.py`)
+- [x] Jupiter API Client (tâche 1.3 dans `01-todo-core.md` complétée)
+- [x] Base de données (nouveau fichier TODO `01-todo-database.md` créé et structuré)
 
 ## Phase 2: AI Agent Core
-- [ ] GeminiClient avec tests
-- [ ] AIAgent avec validation
-- [ ] Intégration DexBot
+- [x] GeminiClient avec tests (implémentation de base et gestion des erreurs dans `GeminiClient` faites, plans de tests définis dans `02-todo-ai-api-gemini.md` tâche 2.3)
+- [x] AIAgent avec validation (Structure `AggregatedInputs` Pydantic implémentée et utilisée, prompt optimisé et parsing de réponse améliorés dans `AIAgent` et `DexBot`)
+- [x] Intégration DexBot (DexBot collecte les `AggregatedInputs`, appelle AIAgent, et exécute les décisions)
 
 ## Phase 3: Backend API
-- [ ] Endpoints FastAPI
-- [ ] Socket.io integration
-- [ ] Middleware de sécurité
+- [~] Endpoints FastAPI (Structure et sécurité de base en place, logique métier par endpoint à compléter - Tâches 1.10.2, 1.10.5 de 01-todo-core.md)
+- [~] Socket.io integration (SocketManager créé et intégré, authentification Socket.io et logique de message spécifique à compléter - Tâche 1.10.1 de 01-todo-core.md)
+- [~] Middleware de sécurité (JWT, CORS, Rate Limiting de base en place - Tâche 1.5.2 de 01-todo-ui.md)
 
 ## Phase 4: Frontend
 - [ ] Structure React de base
