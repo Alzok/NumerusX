@@ -33,7 +33,8 @@ NumerusX operates with a central AI Agent that synthesizes information from a te
 7.  **The Jupiter Maestro (`JupiterApiClient`)**: This new dedicated client handles all interactions with the Jupiter API v6 using the `jupiter-python-sdk`. It's utilized by the `MarketDataProvider` for fetching data and by the `TradingEngine` for executing swaps, limit orders, etc.
 8.  **The Executor (`TradeExecutor` & `TradingEngine`)**: Once the AI Agent makes a decision (conveyed via `DexBot`), these components carry out the actual trades on the Solana network. The `TradingEngine` specifically uses the `JupiterApiClient` for optimal swap routing and other Jupiter-specific operations.
 9.  **The Record Keeper (`Database`)**: All trades, AI Agent decisions (including key inputs and reasoning), and important events are logged.
-10. **The Control Panel (`numerusx-ui/`)**: Your window into NumerusX, built as a React application. It allows you to monitor the AI Agent, its inputs, overall performance, and manage the bot. It interacts with the FastAPI backend.
+10. **The Cache (`Redis`)**: Used for caching frequently accessed data, session management for the UI, and potentially as a message broker for inter-service communication or task queuing, enhancing performance and scalability.
+11. **The Control Panel (`numerusx-ui/`)**: Your window into NumerusX, built as a React application. It allows you to monitor the AI Agent, its inputs, overall performance, and manage the bot. It interacts with the FastAPI backend.
 
 ## Visualizing NumerusX: Architecture and Flow (AI Agent Centric)
 
@@ -68,6 +69,7 @@ graph TD
         TRADE_SYS --> SOLANA("Solana Blockchain / DEXs");
         DB_STORE("app/database.py");
         DB_STORE --> SQLITEDB("SQLite Database");
+        CACHE_SYS["Redis Cache"];
     end
 
     C --> DATASRC;
@@ -99,6 +101,8 @@ graph TD
     %% For trade recording
     AI_AGENT_CORE --> DB_STORE;
     %% For decision logging
+    B_API --> CACHE_SYS;
+    C --> CACHE_SYS;
 
     D --> C;
     A --> F("app/config.py");
@@ -146,6 +150,8 @@ NumerusX/
 ├── app/                        # Python Backend (FastAPI, Bot Logic)
 │   ├── __init__.py
 │   ├── ai_agent.py           # NEW: Central AI Agent for decision making (using Gemini)
+│   ├── ai_agent/             # NEW: Subdirectory for AI agent components
+│   │   └── gemini_client.py  # NEW: Client for Google Gemini API
 │   ├── api_routes.py         # FastAPI routes for UI interaction (API & WebSockets)
 │   ├── analytics_engine.py     # Advanced market analysis and feature engineering (Input to AI Agent)
 │   ├── config.py             # Centralized configuration management

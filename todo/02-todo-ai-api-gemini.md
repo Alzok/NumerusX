@@ -57,6 +57,17 @@
         -   [x] Les erreurs API sont journalisées avec `logger.error()` ou `logger.warning()` et `exc_info=True` pour la trace.
         -   [x] Amélioration de la gestion des erreurs dans `__init__` également.
 
+### Tâche 2.3: Validation et Tests du GeminiClient
+- [ ] **Objectif**: S'assurer que GeminiClient fonctionne correctement avant intégration
+- [ ] **Fichier Concerné**: `tests/test_gemini_client.py` (nouveau)
+- [ ] **Détails**:
+    - [ ] Test d'initialisation avec clé API valide/invalide
+    - [ ] Test d'appel get_decision avec prompt simple
+    - [ ] Test de gestion timeout
+    - [ ] Test de gestion erreurs API spécifiques
+    - [ ] Test de calcul de coût si usage_metadata disponible
+    - [ ] Validation du format de réponse attendu
+
 ## Phase 3: Intégration avec `AIAgent` et Optimisation du Prompt
 
 ### Tâche 3.1: Modification de `AIAgent` pour Utiliser `GeminiClient`
@@ -72,6 +83,24 @@
         -   [x] Appelle `await self.gemini_client.get_decision(prompt_text)`.
         -   [x] Gère la réponse de `GeminiClient` (succès/échec). En cas d'échec, retourne un `HOLD` avec l'erreur.
         -   [ ] Parser la réponse texte du LLM (Placeholder ajouté, Tâche 3.3 pour parsing robuste avec Pydantic).
+
+- [ ] **3.1.5. Implémentation structure aggregated_inputs (Nouveau)**
+    - [ ] **Objectif**: Définir et valider la structure des données d'entrée pour l'AIAgent.
+    - [ ] **Fichiers Concernés**: `app/models/ai_inputs.py` (nouveau), `app/ai_agent.py`, `app/dex_bot.py`
+    - [ ] **Détails**:
+        - [ ] Créer le fichier `app/models/ai_inputs.py`.
+        - [ ] Définir les modèles Pydantic pour chaque source de données composant `aggregated_inputs`:
+            - [ ] `MarketDataInput` (basé sur les données de `MarketDataProvider`)
+            - [ ] `SignalSourceInput` (structure générique pour les signaux des stratégies de `app/strategies` et `app/analytics_engine.py`)
+            - [ ] `PredictionEngineInput` (basé sur les outputs de `PredictionEngine`)
+            - [ ] `RiskManagerInput` (basé sur les outputs de `RiskManager`)
+            - [ ] `SecurityCheckerInput` (basé sur les outputs de `SecurityChecker`)
+            - [ ] `PortfolioManagerInput` (basé sur les outputs de `PortfolioManager`)
+        - [ ] Créer une classe Pydantic principale `AggregatedInputs` dans `app/models/ai_inputs.py` qui combine tous ces modèles d'input.
+            - [ ] S'assurer que cette structure est cohérente avec l'exemple détaillé dans la Tâche 3.2.
+        - [ ] `DexBot._gather_ai_agent_inputs()` (ou méthode équivalente) devra instancier et peupler ce modèle `AggregatedInputs`.
+        - [ ] `AIAgent.decide_trade()` acceptera une instance de `AggregatedInputs`.
+        - [ ] Valider l'instance `AggregatedInputs` avec Pydantic dans `DexBot` avant de la passer à `AIAgent` et dans `AIAgent` avant de construire le prompt, pour s'assurer de la complétude et de la correction des données.
 
     - [ ] **Gestion des Erreurs et Continuité du Cycle par `DexBot`**:
         - `GeminiClient` intercepte les erreurs API brutes (timeouts, rate limits, erreurs de contenu Gemini) et les encapsule en erreurs structurées (ex: `GeminiAPIError` avec des détails) ou retourne un objet de décision indiquant l'échec.
@@ -225,6 +254,21 @@
 
     -   [ ] **Format de Sortie de l'AIAgent (Confirmation)**:
         -   Il est confirmé que le format de sortie JSON pour Gemini défini précédemment dans cette tâche (avec les champs `decision`, `token_pair`, `amount_usd`, `confidence`, `stop_loss_price`, `take_profit_price`, `reasoning`) est bien le format définitif que `AIAgent` s'attend à recevoir et à parser. `DexBot` utilisera ensuite cette structure pour initier des actions via le `TradeExecutor`.
+
+- [ ] **3.2.5. Optimisation des tokens Gemini (Nouveau)**
+    - [ ] **Objectif**: Réduire la taille du prompt envoyé à Gemini pour maîtriser les coûts et respecter les limites de tokens.
+    - [ ] **Fichiers Concernés**: `app/ai_agent.py` (logique de préparation du prompt)
+    - [ ] **Détails**:
+        - [ ] Implémenter une fonction de "compression" ou de "résumé sélectif" des `aggregated_inputs` avant leur conversion en chaîne pour le prompt.
+            - [ ] Pour les données textuelles longues (ex: descriptions d'événements, multiples snippets de raisonnement des signaux), les tronquer intelligemment ou générer des résumés concis (potentiellement avec un LLM local plus petit si justifié, ou des heuristiques).
+            - [ ] Pour les listes de données (ex: `recent_ohlcv_1h`, `signal_sources`), ne transmettre que les N éléments les plus récents ou les plus pertinents, ou des agrégats statistiques.
+        - [ ] Stratégies de résumé intelligent spécifiques pour les données les plus verbeuses :
+            - [ ] `market_data.recent_ohlcv_1h`: Au lieu de toutes les bougies, envoyer des statistiques (début, fin, min, max, volume total sur la période) ou seulement les N dernières bougies.
+            - [ ] `signal_sources`: Si de nombreuses sources, prioriser celles avec la plus haute confiance ou celles qui sont "actives" (non neutres). Concaténer les `reasoning_snippet` de manière concise.
+        - [ ] Implémenter la troncature intelligente des données historiques pour ne pas dépasser `Config.GEMINI_MAX_TOKENS_INPUT`.
+            - [ ] Calculer une estimation de la taille du prompt en tokens avant l'envoi.
+            - [ ] Si la taille estimée dépasse un seuil (ex: 90% de `GEMINI_MAX_TOKENS_INPUT`), appliquer des réductions de contenu plus agressives ou omettre les sections les moins prioritaires (à définir).
+        - [ ] Ajouter la validation de la taille finale du prompt (après préparation) avant de l'envoyer à `GeminiClient`. En cas de dépassement, générer une erreur ou un fallback (HOLD) plutôt que d'envoyer un prompt qui sera rejeté.
 
 ### Tâche 3.3: Parsing Robuste et Validation de la Réponse JSON de Gemini
 -   **Objectif**: Extraire de manière fiable la décision structurée de la réponse texte de Gemini.

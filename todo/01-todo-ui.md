@@ -115,6 +115,45 @@ numerusx-ui/
     -   [ ] Établir la connexion avec le backend FastAPI (l'URL du backend sera configurable via `.env`).
     -   [ ] Mettre en place des listeners pour des événements de test et dispatcher des actions Redux.
 
+## Phase 1.5: Intégration Backend-Frontend (MANQUANTE)
+
+- [ ] **1.5.1. API Endpoints Backend (FastAPI)**
+    - [ ] **Objectif**: Implémenter les routes API REST nécessaires dans le backend FastAPI pour supporter les fonctionnalités de l'UI React.
+    - [ ] **Structure des Fichiers API (Suggestion)**:
+        - [ ] Créer le dossier `app/api/v1/` pour regrouper les routeurs de l'API v1.
+        - [ ] Créer `app/api/v1/__init__.py`.
+        - [ ] Implémenter des modules routeurs spécifiques dans `app/api/v1/`:
+            - [ ] `bot_routes.py`: Endpoints pour contrôler le bot (`/start`, `/stop`, `/pause`, `/status`).
+            - [ ] `config_routes.py`: Endpoints pour la gestion de la configuration (`/config` GET et POST).
+            - [ ] `trades_routes.py`: Endpoints pour l'historique des trades et la soumission de trades manuels (`/trades/history`, `/trades/manual`).
+            - [ ] `portfolio_routes.py`: Endpoints pour les informations du portefeuille (`/portfolio/snapshot`, `/portfolio/positions`).
+            - [ ] `ai_decisions_routes.py`: Endpoints pour l'historique des décisions de l'IA et leur raisonnement (`/ai/decisions/history`, `/ai/decisions/{decision_id}/reasoning`).
+            - [ ] `system_routes.py`: Endpoints pour la santé du système et les logs (`/system/health`, `/system/logs`).
+    - [ ] **Intégration dans `app/main.py`**: Inclure ces routeurs dans l'application FastAPI principale.
+    - [ ] **Modèles Pydantic**: Définir des modèles Pydantic pour les requêtes et les réponses de ces endpoints pour assurer la validation et la documentation automatique (Swagger/OpenAPI).
+
+- [ ] **1.5.2. Middleware et Sécurité Backend (FastAPI)**
+    - [ ] **Objectif**: Mettre en place les middlewares FastAPI nécessaires pour la sécurité, la journalisation et la gestion des requêtes.
+    - [ ] **Détails**:
+        - [ ] **Middleware JWT**: Créer un middleware FastAPI (ou utiliser des dépendances FastAPI) pour valider les tokens JWT (provenant de Clerk/Auth0) sur les endpoints API protégés et sur la connexion Socket.io (lors du handshake initial).
+        - [ ] **Rate Limiting**: Implémenter un rate limiter (ex: avec `fastapi-limiter` et Redis) sur les endpoints API pour prévenir les abus.
+        - [ ] **CORS**: Configurer le middleware CORS (`CORSMiddleware`) dans FastAPI pour autoriser les requêtes provenant du domaine du frontend React.
+        - [ ] **Middleware de Logging des Requêtes**: Mettre en place un middleware pour journaliser les détails de chaque requête API reçue (méthode, chemin, statut, temps de réponse).
+
+## Phase 1.6: Configuration Build et Déploiement
+
+- [ ] **1.6.1. Configuration Vite pour production**
+    - [ ] Configurer vite.config.ts pour optimisation build
+    - [ ] Ajouter variables d'environnement pour différents environnements
+    - [ ] Configurer proxy pour développement local
+    - [ ] Optimiser les imports pour réduire bundle size
+
+- [ ] **1.6.2. Scripts NPM**
+    - [ ] Script dev pour développement avec HMR
+    - [ ] Script build pour production
+    - [ ] Script preview pour test build local
+    - [ ] Script type-check pour validation TypeScript
+
 ## Phase 2: Développement des Fonctionnalités de l'UI par Panneau
 
 *Pour chaque panneau, créer un répertoire dédié dans `src/features/` avec ses propres composants, slice Redux si nécessaire, et vue principale.*

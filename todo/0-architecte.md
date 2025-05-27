@@ -300,6 +300,68 @@ Les modules de cette couche sont redéfinis pour agir comme des fournisseurs d'i
 * **Diversification des Modèles d'IA**: Envisager l'intégration d'autres modèles (spécialisés ou généralistes) en parallèle ou en fallback de Gemini au sein de l'`AIAgent`.
 * **Simulation Avancée ("Digital Twin")**: Développer un jumeau numérique de l'environnement de trading pour des tests et optimisations plus poussés.
 
+## IX. Stratégie de Tests d'Intégration
+
+L'objectif des tests d'intégration est de s'assurer que les différents modules de NumerusX communiquent et fonctionnent correctement ensemble, en particulier le flux de décision principal impliquant l'Agent IA.
+
+### A. Types de Tests d'Intégration
+
+1.  **Tests de Contrat d'Interface (Inter-Modules)**:
+    *   **Objectif**: Vérifier que les données échangées entre les modules respectent les formats et schémas attendus (ex: Pydantic models).
+    *   **Exemples**:
+        *   `DexBot` <-> `MarketDataProvider`: Format des données de marché.
+        *   `DexBot` -> `AIAgent`: Format des `aggregated_inputs`.
+        *   `AIAgent` -> `DexBot`: Format de la décision de trade.
+        *   `DexBot` -> `TradeExecutor`: Format de l'ordre de trade.
+        *   `TradeExecutor` -> `TradingEngine`: Format des paramètres de swap/ordre.
+        *   `TradingEngine` <-> `JupiterApiClient`: Appels et retours du SDK.
+        *   API Backend (FastAPI) <-> UI (React): Contrats des endpoints REST et événements Socket.io.
+    *   **Outils**: `pytest`, mocks pour isoler les paires de modules testées.
+
+2.  **Tests de Scénarios de Bout en Bout (Core Logic)**:
+    *   **Objectif**: Simuler des cycles de trading complets, de la collecte de données à l'exécution (simulée) d'un trade, en passant par la décision de l'IA.
+    *   **Exemples de Scénarios**:
+        *   Un signal "BUY" fort est généré, l'IA confirme, un ordre est passé.
+        *   Données de marché contradictoires, l'IA décide "HOLD".
+        *   Erreur de l'API Jupiter, le système gère l'erreur et se met en pause ou fallback.
+        *   L'API Gemini est indisponible, l'IA fallback sur "HOLD".
+        *   Un utilisateur interagit avec l'UI pour démarrer/arrêter le bot, vérifier le statut.
+    *   **Approche**:
+        *   Utiliser un environnement de test avec des versions mockées des services externes (API Jupiter, API Gemini, Blockchain Solana).
+        *   Injecter des données de scénario spécifiques.
+        *   Vérifier les états intermédiaires, les logs, et les décisions/actions finales.
+
+3.  **Tests d'Intégration API Backend et UI**:
+    *   **Objectif**: S'assurer que l'UI peut correctement interagir avec les endpoints API du backend et recevoir/afficher les mises à jour via WebSockets.
+    *   **Exemples**:
+        *   L'utilisateur se connecte, le token JWT est validé par le backend.
+        *   L'UI affiche les données du portefeuille reçues via API/Socket.io.
+        *   L'utilisateur démarre le bot via l'UI, le backend reçoit la commande.
+        *   Une nouvelle décision de l'IA est prise, l'UI l'affiche en temps réel.
+    *   **Outils**: Frameworks de test UI (ex: Playwright, Cypress) pour les tests E2E, `pytest` pour les tests d'API backend avec un client de test FastAPI.
+
+### B. Environnement de Test
+
+*   Un environnement Docker Compose dédié aux tests d'intégration sera configuré.
+*   Ce dernier utilisera des mocks pour les services externes (APIs tierces, blockchain).
+*   Une base de données de test distincte sera utilisée et réinitialisée avant chaque suite de tests.
+
+### C. Outillage et Automatisation
+
+*   **Framework Principal**: `pytest` pour la majorité des tests backend et d'intégration de logique.
+*   **Mocks**: `unittest.mock` (Python), `nock` ou `msw` (pour les appels HTTP/API côté UI si nécessaire).
+*   **Tests UI E2E**: Playwright ou Cypress (à évaluer).
+*   **Intégration Continue (CI)**: Les tests d'intégration seront exécutés automatiquement dans le pipeline de CI (ex: GitHub Actions) à chaque push ou pull request sur les branches principales.
+
+### D. Focus Particuliers
+
+*   **Flux de Données de l'Agent IA**: Tester en profondeur la collecte, l'agrégation, la transmission à l'IA, et le parsing de la réponse.
+*   **Gestion des Erreurs et Fallbacks**: Scénarios spécifiques pour tester la résilience du système.
+*   **Communication Temps Réel (Socket.io)**: Vérifier la latence et la fiabilité de la transmission des messages.
+*   **Sécurité**: Tests d'intégration pour les flux d'authentification et d'autorisation.
+
+Cette stratégie sera affinée et détaillée au fur et à mesure du développement des fonctionnalités.
+
 ## Points d'Attention / Risques / Ambiguïtés (0-architecte.md - Étendu avec Revue Stratégique)
 * **Complexité**: L'architecture proposée est complète avec de nombreux composants interconnectés ; la gestion de cette complexité sera un défi.
 * **Dépendance IA Agent**: La performance et la fiabilité de l'AIAgent (via Google Gemini initialement) sont critiques. Dépendance aux APIs externes (disponibilité, coût, limitations).
