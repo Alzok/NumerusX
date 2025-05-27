@@ -299,6 +299,12 @@ class Config:
     GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash-preview-05-20")
     GEMINI_API_TIMEOUT_SECONDS = int(os.getenv("GEMINI_API_TIMEOUT_SECONDS", "30")) # Increased default
     GEMINI_MAX_TOKENS_INPUT = int(os.getenv("GEMINI_MAX_TOKENS_INPUT", "4096")) # Consider Gemini 2.5 Flash context window
+    GEMINI_MAX_TOKENS_OUTPUT = int(os.getenv("GEMINI_MAX_TOKENS_OUTPUT", "1024")) # Instruction 6 from review
+    DEBUG_PROMPTS = os.getenv("DEBUG_PROMPTS", "False").lower() == "true" # Instruction 5 from review
+
+    # Configuration for Gemini Cost Calculation (Instruction 7 from review)
+    GEMINI_INPUT_COST_PER_MILLION_TOKENS = float(os.getenv("GEMINI_INPUT_COST_PER_MILLION_TOKENS", "0.35")) # Example for Flash model, adjust as needed
+    GEMINI_OUTPUT_COST_PER_MILLION_TOKENS = float(os.getenv("GEMINI_OUTPUT_COST_PER_MILLION_TOKENS", "1.05")) # Example for Flash model, adjust as needed
 
     # Configuration des Stratégies
     DEFAULT_STRATEGY_NAME = os.getenv("DEFAULT_STRATEGY_NAME", AdvancedTradingStrategy().get_name()) # Default to AdvancedTradingStrategy
@@ -307,6 +313,7 @@ class Config:
     LOG_DIR = os.getenv("LOG_DIR", "logs")
     LOG_FILE_NAME = os.getenv("LOG_FILE_NAME", "numerusx.log") # Nom du fichier de log
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+    LOG_MAX_MSG_LENGTH = int(os.getenv("LOG_MAX_MSG_LENGTH", "4000")) # For limiting log message sizes if needed
     
     # API Configuration (FastAPI backend)
     API_HOST = os.getenv("API_HOST", "0.0.0.0")

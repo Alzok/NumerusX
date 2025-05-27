@@ -1,0 +1,34 @@
+{
+  "dashboard": {
+    "title": "Tableau de Bord",
+    "welcomeMessage": "Bienvenue sur votre Tableau de Bord NumerusX. L'aperçu du portefeuille, l'intelligence de marché et les métriques clés seront affichés ici."
+  },
+  "sidebar": {
+    "dashboard": "Tableau de Bord",
+    "tradingActivity": "Activité de Trading",
+    "commandCenter": "Centre de Commande",
+    "settings": "Paramètres",
+    "mainHeader": "Principal",
+    "systemHeader": "Système"
+  },
+  "header": {
+    "appName": "NumerusX",
+    "loginPlaceholder": "Connexion (Placeholder)"
+  },
+  "footer": {
+    "builtBy": "Créé par l'équipe NumerusX. Le code source est disponible sur GitHub (Placeholder).",
+    "statusLabel": "Statut :",
+    "statusOperational": "Opérationnel (Placeholder)"
+  },
+  "loginPage": {
+    "welcomeTitle": "Bienvenue sur NumerusX",
+    "signInPrompt": "Connectez-vous pour accéder au tableau de bord de votre bot de trading.",
+    "loginButton": "Connexion / Inscription (Placeholder)",
+    "termsNotice": "En vous connectant, vous acceptez nos Conditions d'Utilisation et notre Politique de Confidentialité (Placeholders)."
+  },
+  "generic": {
+    "loading": "Chargement...",
+    "menu": "Menu",
+    "version": "NumerusX v0.1.0 (Dev)"
+  }
+} 

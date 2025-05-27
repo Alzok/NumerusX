@@ -13,6 +13,7 @@ class GeminiClient:
         self.api_key = config.GOOGLE_API_KEY
         self.model_name = config.GEMINI_MODEL_NAME
         self.timeout_seconds = config.GEMINI_API_TIMEOUT_SECONDS
+        self.config = config # Store config for cost calculation
         
         if not self.api_key:
             logger.critical("GOOGLE_API_KEY is not configured. GeminiClient cannot operate.")
@@ -95,7 +96,16 @@ class GeminiClient:
             decision_text = response.text
             usage_metadata = response.usage_metadata if hasattr(response, 'usage_metadata') else None
             
-            # TODO: Add cost calculation here based on usage_metadata if available (Task 5.2)
+            # Calculate cost using the new _calculate_cost method and log it
+            estimated_cost = self._calculate_cost(
+                {
+                    'prompt_token_count': usage_metadata.prompt_token_count if usage_metadata else 0,
+                    'candidates_token_count': usage_metadata.candidates_token_count if usage_metadata else 0,
+                } if usage_metadata else None
+            )
+            if estimated_cost is not None:
+                logger.info(f"Estimated cost for Gemini call: ${estimated_cost:.6f}")
+                # Potentially log to a separate metrics logger or database here if needed
 
             return {
                 'success': True, 
@@ -139,21 +149,21 @@ class GeminiClient:
         if not usage_metadata_dict:
             return None
         
-        # Example pricing (replace with actuals and make configurable via Config)
-        # These should ideally come from Config or a dedicated pricing module
-        INPUT_COST_PER_MILLION_TOKENS = 0.35 # Example for gemini-1.5-flash-latest (<=128k context)
-        OUTPUT_COST_PER_MILLION_TOKENS = 1.05 # Example for gemini-1.5-flash-latest (<=128k context)
+        # Use cost parameters from Config (Instruction 7 from review / Task 2.1.1)
+        input_cost_per_million = self.config.GEMINI_INPUT_COST_PER_MILLION_TOKENS
+        output_cost_per_million = self.config.GEMINI_OUTPUT_COST_PER_MILLION_TOKENS
 
         input_tokens = usage_metadata_dict.get('prompt_token_count', 0)
         output_tokens = usage_metadata_dict.get('candidates_token_count', 0)
         
         if input_tokens is None or output_tokens is None: # Should not happen if usage_metadata_dict is populated
+            logger.warning("_calculate_cost received None for token counts, cannot calculate cost.")
             return None
 
-        input_cost = (input_tokens / 1_000_000) * INPUT_COST_PER_MILLION_TOKENS 
-        output_cost = (output_tokens / 1_000_000) * OUTPUT_COST_PER_MILLION_TOKENS
+        input_cost = (input_tokens / 1_000_000) * input_cost_per_million 
+        output_cost = (output_tokens / 1_000_000) * output_cost_per_million
         total_cost = input_cost + output_cost
-        logger.info(f"Estimated cost for call: ${total_cost:.6f} (Input: {input_tokens} tokens, Output: {output_tokens} tokens)")
+        # Logger call moved to get_decision to avoid duplicate logging if called from elsewhere
         return total_cost
 
 # Example usage (for testing purposes, typically AIAgent would use this)

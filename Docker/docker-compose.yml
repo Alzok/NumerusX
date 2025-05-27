@@ -1,18 +1,22 @@
 services:
-  numerusx:
-    build: 
-      context: .
+  backend:
+    build:
+      context: ../
+      dockerfile: Docker/backend/Dockerfile
       args:
         ENVIRONMENT: dev
-    container_name: numerusx
+    container_name: numerusx_backend
     restart: unless-stopped
     volumes:
-      - ./data:/app/data
-      - ./config:/app/config:ro
+      - ../data:/app/data
+      - ../app:/app/app
+      - ../logs:/app/logs
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8000}:${API_PORT:-8000}"
     env_file:
-      - .env
+      - ../.env
+    depends_on:
+      - redis
     deploy:
       resources:
         limits:
@@ -21,6 +25,27 @@ services:
         reservations:
           memory: 512M
 
+  frontend:
+    build:
+      context: ../
+      dockerfile: Docker/frontend/Dockerfile
+    container_name: numerusx_frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    restart: unless-stopped
+    depends_on:
+      - backend
+    env_file:
+      - ../.env
+
+  redis:
+    image: redis:alpine
+    container_name: numerusx_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
 volumes:
-  data:
-  config:
+  redis_data:

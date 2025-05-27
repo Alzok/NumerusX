@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 import json # Added for logging and example
 import time # Added for example
 import asyncio # Added for async decide_trade
@@ -13,20 +13,23 @@ from app.config import Config
 # from app.portfolio_manager import PortfolioManager
 # from app.strategy_framework import BaseStrategy
 from app.ai_agent.gemini_client import GeminiClient # Import GeminiClient
-# Placeholder for pydantic model for TradeDecision (Task 3.3)
-# from pydantic import BaseModel, ValidationError # Example
+from pydantic import BaseModel, ValidationError, confloat, constr # Added BaseModel, ValidationError, confloat, constr
 
 logger = logging.getLogger(__name__)
 
-# Placeholder for TradeDecision Pydantic model (Task 3.3)
-# class TradeDecisionModel(BaseModel):
-#     decision: str
-#     token_pair: Optional[str] = None
-#     amount_usd: Optional[float] = None
-#     confidence: float
-#     stop_loss_price: Optional[float] = None
-#     take_profit_price: Optional[float] = None
-#     reasoning: str
+# Pydantic model for TradeDecision (Task 3.3 from todo/02-todo-ai-api-gemini.md)
+class TradeDecisionModel(BaseModel):
+    decision: Literal["BUY", "SELL", "HOLD"]
+    token_pair: str # e.g., "SOL/USDC"
+    amount_usd: Optional[confloat(gt=0)] = None
+    confidence: confloat(ge=0, le=1)
+    stop_loss_price: Optional[confloat(gt=0)] = None
+    take_profit_price: Optional[confloat(gt=0)] = None
+    reasoning: constr(min_length=5, max_length=500) # Adjusted min_length
+
+    # Ensure amount_usd is present for BUY/SELL decisions
+    # This can be done with a root_validator if needed, or handled in parsing logic.
+    # For now, we'll assume the LLM is prompted to provide it for BUY/SELL.
 
 class AIAgent:
     """
@@ -57,127 +60,168 @@ class AIAgent:
     async def decide_trade(self, aggregated_inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
         Prend une décision de trading basée sur les inputs agrégés en utilisant Gemini.
+        Retourne un dictionnaire structuré compatible avec TradeExecutor.execute_agent_order
         """
-        try:
-            inputs_snippet = json.dumps(aggregated_inputs, default=str, indent=2)
-            if len(inputs_snippet) > 1000: # Increased snippet size for better debugging
-                inputs_snippet = inputs_snippet[:1000] + "... (truncated)"
-        except TypeError:
-            inputs_snippet = "Inputs contain non-serializable data."
-        logger.debug(f"AIAgent.decide_trade appelé avec les inputs: {inputs_snippet}")
+        # Default 'HOLD' decision in case of errors
+        default_hold_decision = {
+            "decision": "HOLD",
+            "token_pair": aggregated_inputs.get("target_pair_info", {}).get("target_token_symbol", "N/A") + "/" + aggregated_inputs.get("target_pair_info", {}).get("base_token_symbol_for_pair", "N/A"),
+            "amount_usd": None,
+            "confidence": 0.1,
+            "stop_loss_price": None,
+            "take_profit_price": None,
+            "reasoning": "Default HOLD due to an internal error or failure in AI decision process."
+        }
 
-        # 1. Préparer le prompt pour Gemini (Tâche 3.2)
-        # This is a critical step. The prompt must be carefully constructed based on aggregated_inputs
-        # and the expected JSON output format.
-        # For now, a placeholder. Actual prompt construction will be more complex.
+        # 1. Prepare prompt for Gemini
+        prompt_for_gemini: Optional[str] = None
         try:
-            # Attempt to serialize the entire aggregated_inputs as part of the prompt
-            # This will need significant refinement in Task 3.2 for conciseness and clarity for the LLM
-            prompt_payload_json = json.dumps(aggregated_inputs, default=str) 
+            # Log a snippet of inputs (or full if debug enabled later)
+            inputs_for_log = {k: v for k, v in aggregated_inputs.items() if k not in ['market_data']} # Avoid logging large market data
+            inputs_snippet_log = json.dumps(inputs_for_log, default=str, indent=2)
+            if len(inputs_snippet_log) > (self.config.LOG_MAX_MSG_LENGTH // 2): # Use a config for max log length
+                inputs_snippet_log = inputs_snippet_log[:(self.config.LOG_MAX_MSG_LENGTH // 2)] + "... (inputs truncated for log)"
+            logger.debug(f"AIAgent.decide_trade called with inputs (snippet): {inputs_snippet_log}")
+
+            # Serialize full aggregated_inputs for the prompt itself
+            # Handled by _construct_gemini_prompt
+            
         except Exception as e:
-            logger.error(f"Erreur lors de la sérialisation des aggregated_inputs pour le prompt: {e}", exc_info=True)
-            return {
-                'action': 'HOLD',
-                'reasoning': f"Erreur interne de l'AIAgent: Impossible de préparer les données pour l'IA. Détails: {str(e)}",
-                'confidence_score': 0.0
-            }
+            logger.error(f"Erreur lors de la préparation du snippet de log des inputs pour AIAgent: {e}", exc_info=True)
+            # Continue, as logging failure here isn't critical for decision making
 
-        # TODO: Placeholder pour la construction du prompt final (Tâche 3.2)
-        # Le prompt devra inclure des instructions claires, le format de sortie JSON attendu, etc.
-        # et intégrer `prompt_payload_json` de manière structurée.
-        # Exemple simplifié (sera étendu en Tâche 3.2):
-        prompt_for_gemini = (
-            "Vous êtes un agent de trading expert pour NumerusX opérant sur Solana.\n"
-            "Analysez les données suivantes et fournissez une décision de trading (BUY, SELL, ou HOLD) pour la paire spécifiée.\n"
-            "Votre réponse DOIT être un JSON valide respectant le format suivant:\n"
-            "{\n"
-            "  \"decision\": \"BUY\" | \"SELL\" | \"HOLD\",\n"
-            "  \"token_pair\": \"SOL/USDC\",\n"
-            "  \"amount_usd\": float | null, \n"
-            "  \"confidence\": float, \n"
-            "  \"stop_loss_price\": float | null,\n"
-            "  \"take_profit_price\": float | null,\n"
-            "  \"reasoning\": \"Explication concise.\"\n"
-            "}\n\n"
-            "Voici les données à analyser:\n"
-            f"{prompt_payload_json}\n\n"
-            "Fournissez UNIQUEMENT le JSON comme réponse."
-        )
+        try:
+            prompt_for_gemini = self._construct_gemini_prompt(aggregated_inputs)
+            if self.config.DEBUG_PROMPTS: # Instruction 5 from review
+                logger.debug(f"Full prompt for Gemini:\n{prompt_for_gemini}")
+            elif len(prompt_for_gemini) > 2000 : # Log snippet if too long and not debug
+                 logger.debug(f"Prompt for Gemini (snippet):\n{prompt_for_gemini[:1000]}\\n...\\n{prompt_for_gemini[-1000:]}")
 
-        max_output_tokens = self.config.GEMINI_MAX_TOKENS_INPUT // 4 # Arbitrary, ensure output is much smaller than input limit
-        if max_output_tokens < 256: max_output_tokens = 256 # Minimum sensible value
-        if max_output_tokens > 2048: max_output_tokens = 2048 # Maximum sensible value
+        except Exception as e:
+            logger.error(f"Erreur lors de la construction du prompt pour Gemini: {e}", exc_info=True)
+            default_hold_decision['reasoning'] = f"AIAgent internal error: Could not construct prompt for AI. Details: {str(e)}"
+            return default_hold_decision
+        
+        # Determine max_output_tokens based on config (Instruction 6 from review)
+        max_output_tokens = self.config.GEMINI_MAX_TOKENS_OUTPUT
 
-        # 2. Appeler GeminiClient
+        # 2. Call GeminiClient
         gemini_response = await self.gemini_client.get_decision(prompt_for_gemini, max_output_tokens=max_output_tokens)
 
-        # 3. Gérer la réponse du GeminiClient
+        # 3. Handle GeminiClient response
         if not gemini_response['success']:
-            logger.error(f"Erreur de GeminiClient: {gemini_response['error']}")
-            return {
-                'action': 'HOLD',
-                'reasoning': f"L'Agent IA (Gemini) n'a pas pu fournir de décision. Erreur: {gemini_response['error']}",
-                'confidence_score': 0.1 # Low confidence due to error
-            }
+            logger.error(f"GeminiClient error: {gemini_response['error']}")
+            default_hold_decision['reasoning'] = f"AIAgent (Gemini API) failed to provide a decision. Error: {gemini_response['error']}"
+            return default_hold_decision
 
-        # 4. Parser la réponse texte de Gemini (Tâche 3.3)
-        # Placeholder pour le parsing et la validation. 
-        # La Tâche 3.3 implémentera un parsing robuste avec Pydantic.
+        # 4. Parse and validate Gemini's text response (Task 3.3 with Pydantic)
         try:
-            decision_data = json.loads(gemini_response['decision_text'])
-            logger.info(f"Décision brute de Gemini (parsée): {decision_data}")
+            raw_decision_text = gemini_response['decision_text']
+            # Attempt to extract JSON if it's embedded in other text (common for some models)
+            # Basic extraction: look for '{' and '}'
+            json_start_index = raw_decision_text.find('{')
+            json_end_index = raw_decision_text.rfind('}')
             
-            # TODO: Valider avec Pydantic (TradeDecisionModel) ici (Tâche 3.3)
-            # Exemple de ce que Pydantic ferait:
-            # validated_decision = TradeDecisionModel(**decision_data)
-            # decision_to_return = validated_decision.dict()
-            
-            # Pour l'instant, on retourne les données parsées directement, en s'assurant que les clés attendues existent.
-            # This is a temporary measure and not robust.
-            action = decision_data.get('decision', 'HOLD').upper()
-            reasoning = decision_data.get('reasoning', 'Raisonnement manquant de la part de Gemini.')
-            confidence = decision_data.get('confidence', 0.5)
-            token_pair = decision_data.get('token_pair')
-            amount_usd = decision_data.get('amount_usd')
-            stop_loss = decision_data.get('stop_loss_price')
-            take_profit = decision_data.get('take_profit_price')
+            if json_start_index != -1 and json_end_index != -1 and json_end_index > json_start_index:
+                json_str_to_parse = raw_decision_text[json_start_index : json_end_index + 1]
+            else:
+                json_str_to_parse = raw_decision_text # Assume it's a direct JSON string
 
-            # Convertir au format attendu par le reste du système (si différent)
-            # Le format de sortie de Gemini est déjà proche de ce qui est attendu.
-            final_decision = {
-                'action': action,
-                'pair': token_pair, # Assumer que Gemini le fournit
-                'amount': amount_usd, # Sera interprété comme amount_usd
-                'amount_is_quote': True if amount_usd is not None else None, # Si amount_usd, c'est en quote
-                'order_type': 'MARKET', # Gemini ne spécifie pas le type d'ordre, MARKET par défaut
-                'limit_price': None, 
-                'stop_loss': stop_loss,
-                'take_profit': take_profit,
-                'reasoning': reasoning,
-                'confidence_score': confidence
-            }
-            if action not in ["BUY", "SELL", "HOLD"]:
-                 logger.warning(f"Décision invalide de Gemini: {action}. Forçage à HOLD.")
-                 final_decision['action'] = 'HOLD'
-                 final_decision['reasoning'] += " (Action invalide reçue, forcée à HOLD)"
+            parsed_json_data = json.loads(json_str_to_parse)
+            
+            # Validate with Pydantic model (Instruction 3 from review)
+            validated_decision = TradeDecisionModel(**parsed_json_data)
+            
+            # Check if BUY/SELL has amount_usd
+            if validated_decision.decision in ["BUY", "SELL"] and validated_decision.amount_usd is None:
+                logger.warning(f"Gemini returned {validated_decision.decision} without amount_usd. Invalidating. Raw: {parsed_json_data}")
+                raise ValidationError("BUY/SELL decision must include amount_usd.", TradeDecisionModel)
+
+            logger.info(f"Validated AI Decision: {validated_decision.model_dump_json(indent=2)}")
+            
+            # Convert Pydantic model to dict for TradeExecutor
+            # This is already the format expected by execute_agent_order
+            final_decision_for_executor = validated_decision.model_dump()
 
         except json.JSONDecodeError as e:
-            logger.error(f"Impossible de parser la réponse JSON de Gemini: {gemini_response['decision_text']}. Erreur: {e}", exc_info=True)
-            return {
-                'action': 'HOLD',
-                'reasoning': f"L'Agent IA (Gemini) a retourné une réponse non-JSON. Réponse: {gemini_response['decision_text'][:200]}...",
-                'confidence_score': 0.1
-            }
+            logger.error(f"Cannot parse JSON response from Gemini: '{raw_decision_text}'. Error: {e}", exc_info=True)
+            default_hold_decision['reasoning'] = f"AIAgent (Gemini) returned a non-JSON response. Response: {raw_decision_text[:200]}..."
+            return default_hold_decision
+        except ValidationError as e:
+            logger.error(f"Gemini response failed Pydantic validation: '{parsed_json_data if 'parsed_json_data' in locals() else raw_decision_text}'. Errors: {e.errors()}", exc_info=True)
+            # Log the full text that caused validation error for debugging
+            if 'raw_decision_text' in locals():
+                 logger.debug(f"Raw text from Gemini causing validation error: {raw_decision_text}")
+            default_hold_decision['reasoning'] = f"AIAgent (Gemini) response failed validation. Details: {e.errors()}"
+            return default_hold_decision
         except Exception as e:
-            logger.error(f"Erreur inattendue lors du traitement de la réponse de Gemini: {e}", exc_info=True)
-            return {
-                'action': 'HOLD',
-                'reasoning': f"Erreur interne de l'AIAgent lors du traitement de la réponse de l'IA. Détails: {str(e)}",
-                'confidence_score': 0.0
-            }
+            logger.error(f"Unexpected error processing Gemini response: {e}", exc_info=True)
+            default_hold_decision['reasoning'] = f"AIAgent internal error processing AI response. Details: {str(e)}"
+            return default_hold_decision
 
-        logger.info(f"AIAgent decision: {final_decision['action']} pour {final_decision.get('pair', 'N/A')}, Confidence: {final_decision['confidence_score']}, Reason: {final_decision['reasoning']}")
-        return final_decision
+        logger.info(f"AIAgent final decision for TradeExecutor: {final_decision_for_executor}")
+        return final_decision_for_executor
+
+    def _construct_gemini_prompt(self, aggregated_inputs: Dict[str, Any]) -> str:
+        """
+        Constructs the full prompt for Gemini based on aggregated_inputs.
+        (Corresponds to todo/02-todo-ai-api-gemini.md Tâche 3.2)
+        """
+        # Extract target pair info for clarity in prompt
+        target_pair_info = aggregated_inputs.get("target_pair_info", {})
+        target_symbol = target_pair_info.get("target_token_symbol", "N/A")
+        base_symbol = target_pair_info.get("base_token_symbol_for_pair", "N/A")
+        current_pair_str = f"{target_symbol}/{base_symbol}"
+
+        # Serialize inputs for the prompt (can be selective to reduce token count)
+        # Example: Exclude very verbose fields or summarize them if necessary
+        prompt_payload_data = {}
+        for key, value in aggregated_inputs.items():
+            if key == "market_data" and value and "ohlcv_data" in value and value["ohlcv_data"]:
+                # Summarize OHLCV if too long, or just pass recent N candles
+                # For now, let's ensure it's serializable and not excessively long
+                # A better summarization or feature extraction should happen before this point if needed.
+                prompt_payload_data[key] = value # Pass as is for now, assuming it's managed
+            elif key == "signal_sources" and value and "strategy_analysis" in value:
+                # Ensure strategy analysis is concise
+                prompt_payload_data[key] = value
+            else:
+                prompt_payload_data[key] = value
+        
+        try:
+            prompt_payload_json = json.dumps(prompt_payload_data, default=str, indent=2)
+        except Exception as e:
+            logger.error(f"Error serializing aggregated_inputs for prompt construction: {e}", exc_info=True)
+            raise ValueError(f"Could not serialize inputs for Gemini prompt: {e}")
+
+        # Structure from todo/02-todo-ai-api-gemini.md - Tâche 3.2
+        prompt = f"""ROLE: NumerusX Solana Trading Agent (using {self.config.GEMINI_MODEL_NAME} model).
+Analyze the following data for {current_pair_str} and provide a trading decision.
+
+INSTRUCTIONS:
+Based ONLY on the provided data, decide to BUY, SELL, or HOLD {current_pair_str}.
+If BUY or SELL:
+  - Specify amount_usd to trade (consider risk parameters and available capital). This field is MANDATORY for BUY/SELL.
+  - Suggest stop_loss_price and take_profit_price.
+Output your decision and reasoning STRICTLY in the following JSON format:
+{{
+  "decision": "BUY" | "SELL" | "HOLD",
+  "token_pair": "{current_pair_str}",
+  "amount_usd": float | null,
+  "confidence": float,
+  "stop_loss_price": float | null,
+  "take_profit_price": float | null,
+  "reasoning": "Concise explanation based on synthesized data points (max 500 chars)."
+}}
+Prioritize capital preservation. If data is conflicting or insufficient for a high-confidence trade, prefer HOLD.
+Be concise in your reasoning.
+Ensure your output strictly follows the JSON format specified. Do not include any text before or after the JSON object.
+
+PROVIDED DATA:
+{prompt_payload_json}
+
+JSON RESPONSE:"""
+        return prompt
 
     # D'autres méthodes pourraient être ajoutées ici pour:
     # - Le chargement/entraînement de modèles spécifiques à l'agent.

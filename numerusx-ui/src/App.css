@@ -1,0 +1,27 @@
+/* Add any App-specific styles here if needed */
+/* For example, you might have styles that are only relevant to the App component */
+
+/* 
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-header {
+  background-color: #282c34;
+  padding: 20px;
+  color: white;
+}
+
+.app-main {
+  flex-grow: 1;
+  padding: 20px;
+}
+
+.app-footer {
+  background-color: #f1f1f1;
+  padding: 10px;
+  text-align: center;
+}
+*/ 

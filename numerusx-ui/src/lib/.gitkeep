@@ -1,0 +1,3 @@
+// This is a placeholder file for the lib directory
+// Utilities, helpers, i18n config, Socket.IO client, etc., will be placed here.
+export {}; 
