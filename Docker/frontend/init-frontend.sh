@@ -129,7 +129,7 @@ if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ] || [ "packag
   # Installer shadcn/ui automatiquement après npm install
   echo "🎨 Installation de shadcn/ui..."
   
-  # Créer components.json pour shadcn/ui
+  # Créer components.json pour shadcn/ui avec thème slate/yellow
   cat > components.json << 'EOF'
 {
   "$schema": "https://ui.shadcn.com/schema.json",
@@ -144,8 +144,78 @@ if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ] || [ "packag
     "prefix": ""
   },
   "aliases": {
-    "components": "src/components",
-    "utils": "src/lib/utils"
+    "components": "@/components",
+    "utils": "@/lib/utils"
+  }
+}
+EOF
+
+  # Configurer le thème slate avec couleur jaune
+  echo "🎨 Configuration du thème slate/yellow..."
+  cat > src/styles/theme.css << 'EOF'
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    
+    --primary: 48 96% 53%; /* Yellow */
+    --primary-foreground: 0 0% 0%;
+    
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    
+    --accent: 48 96% 53%; /* Yellow accent */
+    --accent-foreground: 0 0% 0%;
+    
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    
+    --ring: 48 96% 53%; /* Yellow ring */
+    
+    --radius: 0.5rem;
+  }
+  
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    
+    --primary: 48 96% 53%; /* Yellow */
+    --primary-foreground: 0 0% 0%;
+    
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    
+    --accent: 48 96% 53%; /* Yellow accent */
+    --accent-foreground: 0 0% 0%;
+    
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 85.7% 97.3%;
+    
+    --ring: 48 96% 53%; /* Yellow ring */
   }
 }
 EOF

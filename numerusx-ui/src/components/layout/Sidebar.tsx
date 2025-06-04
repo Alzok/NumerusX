@@ -1,73 +1,216 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom'; // Import Link and useLocation
-import { useTranslation } from 'react-i18next'; // Import useTranslation
-import { ScrollArea } from '@/components/ui/scroll-area'; // Assuming ShadCN/UI
-import { cn } from '@/lib/utils'; // Assuming ShadCN/UI utility
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAuth0 } from '@auth0/auth0-react';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarFooter,
+  SidebarRail,
+} from '@/components/ui/sidebar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { LayoutDashboard, Settings, BarChart3, Zap } from 'lucide-react'; // Removed LogOut as it will be handled by auth
+import { Separator } from '@/components/ui/separator';
+import {
+  BarChart3,
+  TrendingUp,
+  Bot,
+  Settings,
+  LogOut,
+  User,
+  DollarSign,
+  Activity,
+  Zap,
+} from 'lucide-react';
+import { useBotStatus } from '@/hooks/useBot';
 
-interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> {
-  // Add any specific props if needed, e.g., for user roles to show/hide links
+interface SidebarItem {
+  title: string;
+  icon: React.ElementType;
+  url: string;
+  badge?: string;
+  isActive?: boolean;
+  subItems?: SidebarItem[];
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ className }) => {
-  const location = useLocation(); // Hook to get current location
-  const { t } = useTranslation(); // Initialize useTranslation
+const SidebarComponent: React.FC<{ className?: string }> = ({ className }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, logout } = useAuth0();
+  const { data: botStatus } = useBotStatus();
 
-  const mainNavItems = [
-    { href: '/dashboard', labelKey: 'sidebar.dashboard', icon: LayoutDashboard },
-    { href: '/trading', labelKey: 'sidebar.tradingActivity', icon: BarChart3 },
-    { href: '/command', labelKey: 'sidebar.commandCenter', icon: Zap },
-    // Add more main navigation items here
+  const navigationItems: SidebarItem[] = [
+    {
+      title: 'Dashboard',
+      icon: BarChart3,
+      url: '/dashboard',
+      isActive: location.pathname === '/dashboard',
+    },
+    {
+      title: 'Trading',
+      icon: TrendingUp,
+      url: '/trading',
+      isActive: location.pathname === '/trading',
+      subItems: [
+        {
+          title: 'Trades Actifs',
+          icon: Activity,
+          url: '/trading/active',
+          isActive: location.pathname === '/trading/active',
+        },
+        {
+          title: 'Historique',
+          icon: BarChart3,
+          url: '/trading/history',
+          isActive: location.pathname === '/trading/history',
+        },
+      ],
+    },
+    {
+      title: 'Bot IA',
+      icon: Bot,
+      url: '/command',
+      isActive: location.pathname === '/command',
+      badge: botStatus?.is_running ? 'ACTIF' : 'ARRÊTÉ',
+    },
+    {
+      title: 'Portfolio',
+      icon: DollarSign,
+      url: '/portfolio',
+      isActive: location.pathname === '/portfolio',
+    },
+    {
+      title: 'Paramètres',
+      icon: Settings,
+      url: '/settings',
+      isActive: location.pathname === '/settings',
+    },
   ];
 
-  const secondaryNavItems = [
-    { href: '/settings', labelKey: 'sidebar.settings', icon: Settings },
-    // { href: '/logout', label: 'Logout', icon: LogOut }, // Handled by Auth provider usually
-  ];
+  const handleNavigation = (url: string) => {
+    navigate(url);
+  };
 
-  const renderNavLink = (item: { href: string; labelKey: string; icon: React.ElementType }, index: number) => (
-    <Button
-      key={`${item.labelKey}-${index}`}
-      variant="ghost"
-      className={cn(
-        'w-full justify-start mb-1',
-        location.pathname === item.href && 'bg-muted hover:bg-muted text-primary' // Active link styling
-      )}
-      asChild // Important: This allows Button to wrap Link and inherit its behavior
-    >
-      <Link to={item.href}>
-        <item.icon className="mr-2 h-4 w-4" />
-        {t(item.labelKey)} {/* Use t function for label */}
-      </Link>
-    </Button>
-  );
+  const handleLogout = () => {
+    logout({ logoutParams: { returnTo: window.location.origin } });
+  };
 
   return (
-    <aside className={cn("hidden md:flex md:flex-col md:border-r bg-background", className)}>
-      <div className="flex h-14 items-center border-b px-4 lg:h-[60px] lg:px-6">
-        <Link to="/" className="flex items-center gap-2 font-semibold">
-          {/* <Bot className="h-6 w-6" /> You can add Bot icon here if you have it */}
-          <span>{t('generic.menu')}</span>
-        </Link>
-      </div>
-      <ScrollArea className="flex-1 p-4">
-        <nav className="grid items-start gap-1 text-sm font-medium">
-          <h3 className="px-2 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider">{t('sidebar.mainHeader')}</h3>
-          {mainNavItems.map(renderNavLink)}
-          
-          <h3 className="mt-3 px-2 py-1.5 text-xs font-semibold text-muted-foreground tracking-wider">{t('sidebar.systemHeader')}</h3>
-          {secondaryNavItems.map(renderNavLink)}
-        </nav>
-      </ScrollArea>
-      <div className="mt-auto p-4 border-t">
-        {/* Placeholder for user info or quick actions */}
-        <p className="text-xs text-muted-foreground text-center">
-          {t('generic.version')}
-        </p>
-      </div>
-    </aside>
+    <Sidebar className={className} variant="sidebar">
+      <SidebarHeader className="border-b">
+        <div className="flex items-center gap-3 px-4 py-4">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <Zap className="h-4 w-4" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-lg font-bold">NumerusX</span>
+            <span className="text-xs text-muted-foreground">Trading Bot IA</span>
+          </div>
+        </div>
+      </SidebarHeader>
+
+      <SidebarContent className="flex-1 overflow-y-auto">
+        <SidebarMenu>
+          {navigationItems.map((item) => (
+            <SidebarMenuItem key={item.url}>
+              <SidebarMenuButton
+                onClick={() => handleNavigation(item.url)}
+                isActive={item.isActive}
+                className="w-full justify-start"
+              >
+                <item.icon className="h-4 w-4" />
+                <span>{item.title}</span>
+                {item.badge && (
+                  <Badge 
+                    variant={item.badge === 'ACTIF' ? 'default' : 'secondary'}
+                    className={`ml-auto text-xs ${
+                      item.badge === 'ACTIF' 
+                        ? 'bg-green-600 hover:bg-green-700' 
+                        : 'bg-slate-600 hover:bg-slate-700'
+                    }`}
+                  >
+                    {item.badge}
+                  </Badge>
+                )}
+              </SidebarMenuButton>
+              
+              {item.subItems && item.subItems.length > 0 && (
+                <SidebarMenuSub>
+                  {item.subItems.map((subItem) => (
+                    <SidebarMenuSubItem key={subItem.url}>
+                      <SidebarMenuSubButton
+                        onClick={() => handleNavigation(subItem.url)}
+                        isActive={subItem.isActive}
+                      >
+                        <subItem.icon className="h-3 w-3" />
+                        <span>{subItem.title}</span>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  ))}
+                </SidebarMenuSub>
+              )}
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+      </SidebarContent>
+
+      <SidebarFooter className="border-t">
+        <div className="p-4 space-y-4">
+          {/* Bot Status */}
+          {botStatus && (
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div 
+                  className={`h-2 w-2 rounded-full ${
+                    botStatus.is_running ? 'bg-green-500' : 'bg-slate-500'
+                  }`} 
+                />
+                <span className="text-sm text-muted-foreground">
+                  Bot {botStatus.is_running ? 'Actif' : 'Arrêté'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          <Separator />
+
+          {/* User Profile */}
+          <div className="flex items-center gap-3">
+            <Avatar className="h-8 w-8">
+              <AvatarImage src={user?.picture} alt={user?.name} />
+              <AvatarFallback>
+                <User className="h-4 w-4" />
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{user?.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+            </div>
+          </div>
+
+          {/* Logout Button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleLogout}
+            className="w-full justify-start"
+          >
+            <LogOut className="h-4 w-4 mr-2" />
+            Déconnexion
+          </Button>
+        </div>
+      </SidebarFooter>
+
+      <SidebarRail />
+    </Sidebar>
   );
 };
 
-export default Sidebar; 
+export default SidebarComponent; 

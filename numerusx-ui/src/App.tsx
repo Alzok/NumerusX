@@ -1,36 +1,65 @@
 import React, { useEffect } from 'react';
-import { Routes, Route, Outlet, Navigate } from 'react-router-dom';
-import { useAuth0 } from '@auth0/auth0-react'; // Import useAuth0
-import Header from '@/components/layout/Header';
-import Sidebar from '@/components/layout/Sidebar';
-import Footer from '@/components/layout/Footer';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { useAuth0 } from '@auth0/auth0-react';
+import { SidebarProvider, SidebarInset, SidebarTrigger } from '@/components/ui/sidebar';
+import { Separator } from '@/components/ui/separator';
+import { Breadcrumb, BreadcrumbList, BreadcrumbItem, BreadcrumbPage } from '@/components/ui/breadcrumb';
+import SidebarComponent from '@/components/layout/Sidebar';
 import DashboardPage from '@/pages/DashboardPage';
 import TradingPage from '@/pages/TradingPage';
 import CommandPage from '@/pages/CommandPage';
 import SettingsPage from '@/pages/SettingsPage';
-import LoginPage from '@/pages/LoginPage'; // Assuming you have a LoginPage
-import { AuthenticationGuard } from '@/components/auth/AuthenticationGuard'; // Import the guard
-import { initSocketConnection, disconnectSocket } from '@/lib/socketClient'; // Import socket functions
-import { useApiClient } from '@/hooks/useApiClient'; // Import API client hook
+import LoginPage from '@/pages/LoginPage';
+import { AuthenticationGuard } from '@/components/auth/AuthenticationGuard';
+import { initSocketConnection, disconnectSocket } from '@/lib/socketClient';
+import { useApiClient } from '@/hooks/useApiClient';
 import './App.css';
 
 // Layout component for authenticated routes
-const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="flex flex-col min-h-screen bg-background text-foreground">
-    <Header />
-    <div className="flex flex-1 pt-14"> {/* Add padding-top to account for sticky header height */}
-      <Sidebar className="w-64 hidden md:block fixed top-14 left-0 h-[calc(100vh-56px)]" /> {/* Adjust width, top, and height */}
-      <main className="flex-1 p-4 md:p-6 lg:p-8 md:ml-64"> {/* Add margin-left to account for sidebar width */}
-        {children} {/* Render children instead of Outlet */}
-      </main>
-    </div>
-    {/* Footer can be optional within the authenticated layout or outside */}
-    {/* <Footer /> */}
-  </div>
-);
+const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const getCurrentPageTitle = () => {
+    const path = window.location.pathname;
+    switch (path) {
+      case '/dashboard':
+        return 'Dashboard';
+      case '/trading':
+        return 'Trading';
+      case '/command':
+        return 'Bot IA';
+      case '/settings':
+        return 'Paramètres';
+      default:
+        return 'Dashboard';
+    }
+  };
 
-// Separate layout for public routes like Login if needed
-// const PublicLayout: React.FC = () => (<Outlet />);
+  return (
+    <SidebarProvider>
+      <SidebarComponent />
+      <SidebarInset>
+        {/* Header with breadcrumb */}
+        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+          <div className="flex items-center gap-2 px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{getCurrentPageTitle()}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+        </header>
+        
+        {/* Main content */}
+        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
+          {children}
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
+  );
+};
 
 const App: React.FC = () => {
   const { isLoading, error, isAuthenticated } = useAuth0();
@@ -50,17 +79,20 @@ const App: React.FC = () => {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-lg text-muted-foreground">Loading application...</p>
-        {/* You can replace this with a more sophisticated spinner/loader component */}
+        <div className="text-center space-y-4">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          <p className="text-lg text-muted-foreground">Chargement de l'application...</p>
+        </div>
       </div>
     );
   }
 
-  // Could add more robust error handling here, e.g., display a specific error page
   if (error) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <p className="text-lg text-red-500">Authentication Error: {error.message}</p>
+        <div className="text-center space-y-4">
+          <p className="text-lg text-destructive">Erreur d'authentification: {error.message}</p>
+        </div>
       </div>
     );
   }
@@ -68,7 +100,6 @@ const App: React.FC = () => {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      {/* All other routes are protected and use ProtectedRoutes component */}
       <Route 
         path="/*" 
         element={<AuthenticationGuard component={ProtectedRoutes} />} 
@@ -91,7 +122,6 @@ const ProtectedRoutes: React.FC = () => {
           initSocketConnection(token); 
         } catch (e) {
           console.error('Error getting access token or connecting socket:', e);
-          // Handle error, maybe redirect to login or show a message
         }
       }
     };
@@ -100,8 +130,6 @@ const ProtectedRoutes: React.FC = () => {
 
     return () => {
       isMounted = false;
-      // Optional: Disconnect socket on component unmount if not handled elsewhere or if user logs out
-      // disconnectSocket(); 
     };
   }, [isAuthenticated, getAccessTokenSilently]);
 
@@ -113,7 +141,6 @@ const ProtectedRoutes: React.FC = () => {
         <Route path="trading" element={<TradingPage />} />
         <Route path="command" element={<CommandPage />} />
         <Route path="settings" element={<SettingsPage />} />
-        {/* Fallback for any route not matched within the authenticated layout */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} /> 
       </Routes>
     </AppLayout>

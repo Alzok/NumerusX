@@ -1,6 +1,9 @@
 import React from 'react';
 import { cn } from '@/lib/utils';
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
 
 export interface KpiCardProps {
   title: string;
@@ -41,22 +44,22 @@ export const KpiCard: React.FC<KpiCardProps> = ({
   const getTrendIcon = () => {
     switch (currentTrend) {
       case 'up':
-        return <TrendingUp className="h-4 w-4 text-green-600" />;
+        return <TrendingUp className="h-4 w-4" />;
       case 'down':
-        return <TrendingDown className="h-4 w-4 text-red-600" />;
+        return <TrendingDown className="h-4 w-4" />;
       default:
-        return <Minus className="h-4 w-4 text-gray-400" />;
+        return <Minus className="h-4 w-4" />;
     }
   };
 
-  const getTrendColor = () => {
+  const getTrendVariant = () => {
     switch (currentTrend) {
       case 'up':
-        return 'text-green-600';
+        return 'default';
       case 'down':
-        return 'text-red-600';
+        return 'destructive';
       default:
-        return 'text-gray-400';
+        return 'secondary';
     }
   };
 
@@ -69,65 +72,64 @@ export const KpiCard: React.FC<KpiCardProps> = ({
 
   if (isLoading) {
     return (
-      <div className={cn(
-        "bg-card rounded-lg border p-6 shadow-sm",
-        className
-      )}>
-        <div className="flex items-center justify-between">
-          <div className="space-y-2">
-            <div className="h-4 w-24 bg-gray-200 rounded animate-pulse" />
-            <div className="h-8 w-32 bg-gray-200 rounded animate-pulse" />
-          </div>
-          {icon && (
-            <div className="h-8 w-8 bg-gray-200 rounded animate-pulse" />
+      <Card className={className}>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <Skeleton className="h-4 w-24" />
+          {icon && <Skeleton className="h-8 w-8" />}
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-8 w-32 mb-2" />
+          {change && (
+            <div className="flex items-center space-x-2">
+              <Skeleton className="h-4 w-4" />
+              <Skeleton className="h-4 w-20" />
+            </div>
           )}
-        </div>
-        {change && (
-          <div className="mt-4 flex items-center space-x-2">
-            <div className="h-4 w-4 bg-gray-200 rounded animate-pulse" />
-            <div className="h-4 w-20 bg-gray-200 rounded animate-pulse" />
-          </div>
-        )}
-      </div>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className={cn(
-      "bg-card rounded-lg border p-6 shadow-sm hover:shadow-md transition-shadow",
-      className
-    )}>
-      <div className="flex items-center justify-between">
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-muted-foreground">
-            {title}
-          </p>
-          <p className="text-3xl font-bold tracking-tight">
-            {formatValue(value)}
-          </p>
-        </div>
+    <Card className={cn("hover:shadow-md transition-shadow", className)}>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <p className="text-sm font-medium text-muted-foreground">
+          {title}
+        </p>
         {icon && (
           <div className="h-8 w-8 text-muted-foreground">
             {icon}
           </div>
         )}
-      </div>
-      
-      {change && (
-        <div className="mt-4 flex items-center space-x-2">
-          {getTrendIcon()}
-          <span className={cn("text-sm font-medium", getTrendColor())}>
-            {change.value > 0 ? '+' : ''}
-            {formatter ? formatter(change.value) : change.value}
-            {' '}
-            ({change.percentage > 0 ? '+' : ''}{change.percentage.toFixed(1)}%)
-          </span>
-          <span className="text-sm text-muted-foreground">
-            vs {change.period}
-          </span>
+      </CardHeader>
+      <CardContent>
+        <div className="text-3xl font-bold tracking-tight mb-2">
+          {formatValue(value)}
         </div>
-      )}
-    </div>
+        
+        {change && (
+          <div className="flex items-center space-x-2">
+            <Badge 
+              variant={getTrendVariant()}
+              className={cn(
+                "text-xs px-2 py-1",
+                currentTrend === 'up' && "bg-green-600 hover:bg-green-700",
+                currentTrend === 'down' && "bg-red-600 hover:bg-red-700"
+              )}
+            >
+              {getTrendIcon()}
+              <span className="ml-1">
+                {change.value > 0 ? '+' : ''}
+                {formatter ? formatter(change.value) : change.value}
+              </span>
+            </Badge>
+            <span className="text-xs text-muted-foreground">
+              ({change.percentage > 0 ? '+' : ''}{change.percentage.toFixed(1)}%) vs {change.period}
+            </span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 };
 

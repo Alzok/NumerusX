@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { apiClient, PortfolioSnapshot } from '@/lib/apiClient';
+import { apiClient } from '@/lib/apiClient';
 
 export interface UsePortfolioOptions {
   enabled?: boolean;
@@ -9,15 +9,15 @@ export interface UsePortfolioOptions {
 /**
  * Hook pour récupérer le snapshot du portfolio
  */
-export const usePortfolioSnapshot = (options: UsePortfolioOptions = {}) => {
-  const { enabled = true, refetchInterval = 30 * 1000 } = options; // 30 secondes par défaut
-
+export const usePortfolioSnapshot = () => {
   return useQuery({
     queryKey: ['portfolio', 'snapshot'],
-    queryFn: () => apiClient.getPortfolioSnapshot(),
-    enabled,
-    staleTime: 15 * 1000, // 15 secondes
-    refetchInterval,
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/portfolio/snapshot');
+      return response.data;
+    },
+    staleTime: 30 * 1000, // 30 secondes
+    refetchInterval: 60 * 1000, // Actualiser toutes les 60 secondes
   });
 };
 

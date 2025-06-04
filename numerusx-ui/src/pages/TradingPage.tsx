@@ -2,7 +2,11 @@ import React from 'react';
 import { TradesTable } from '@/components/ui/trades-table';
 import { TradingForm } from '@/components/ui/trading-form';
 import { useTrades } from '@/hooks/useTrades';
-import { Zap, TrendingUp } from 'lucide-react';
+import { TrendingUp, BarChart3, AlertCircle } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 const TradingPage: React.FC = () => {
   const { data: trades = [], isLoading, error, refetch } = useTrades({ limit: 50 });
@@ -16,8 +20,11 @@ const TradingPage: React.FC = () => {
     console.error('❌ Trade execution failed:', error);
   };
 
+  const buyTrades = trades.filter((t: any) => t.type === 'BUY').length;
+  const sellTrades = trades.filter((t: any) => t.type === 'SELL').length;
+
   return (
-    <div className="container mx-auto p-4 space-y-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-2">
@@ -31,17 +38,19 @@ const TradingPage: React.FC = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-md p-4">
-          <p className="text-red-800">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>
             Erreur lors du chargement des trades : {error.message}
-          </p>
-          <button 
-            onClick={() => refetch()}
-            className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-          >
-            Réessayer
-          </button>
-        </div>
+            <Button 
+              variant="link" 
+              className="ml-2 h-auto p-0 text-destructive underline"
+              onClick={() => refetch()}
+            >
+              Réessayer
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -53,42 +62,64 @@ const TradingPage: React.FC = () => {
         </div>
 
         <div className="lg:col-span-2">
-          <div className="bg-card rounded-lg border p-6">
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <Zap className="h-5 w-5 text-blue-600" />
-              Statistiques Rapides
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="text-center p-4 bg-blue-50 rounded-lg border">
-                <div className="text-2xl font-bold text-blue-600">
-                  {trades.length}
-                </div>
-                <div className="text-sm text-gray-600">Total Trades</div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart3 className="h-5 w-5" />
+                Statistiques Rapides
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Card>
+                  <CardContent className="text-center p-4">
+                    <div className="text-2xl font-bold mb-1">
+                      {trades.length}
+                    </div>
+                    <Badge variant="outline" className="text-xs">
+                      Total Trades
+                    </Badge>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="text-center p-4">
+                    <div className="text-2xl font-bold text-green-600 mb-1">
+                      {buyTrades}
+                    </div>
+                    <Badge className="bg-green-600 hover:bg-green-700 text-xs">
+                      Achats
+                    </Badge>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardContent className="text-center p-4">
+                    <div className="text-2xl font-bold text-red-600 mb-1">
+                      {sellTrades}
+                    </div>
+                    <Badge variant="destructive" className="text-xs">
+                      Ventes
+                    </Badge>
+                  </CardContent>
+                </Card>
               </div>
-              <div className="text-center p-4 bg-green-50 rounded-lg border">
-                <div className="text-2xl font-bold text-green-600">
-                  {trades.filter((t: any) => t.type === 'BUY').length}
-                </div>
-                <div className="text-sm text-gray-600">Achats</div>
-              </div>
-              <div className="text-center p-4 bg-red-50 rounded-lg border">
-                <div className="text-2xl font-bold text-red-600">
-                  {trades.filter((t: any) => t.type === 'SELL').length}
-                </div>
-                <div className="text-sm text-gray-600">Ventes</div>
-              </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
-      <div className="bg-card rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Historique des Trades</h2>
-        <TradesTable 
-          data={trades} 
-          isLoading={isLoading}
-        />
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Historique des Trades</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TradesTable 
+            data={trades} 
+            isLoading={isLoading}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 };

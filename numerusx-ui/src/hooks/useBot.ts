@@ -1,18 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { apiClient, BotStatus } from '@/lib/apiClient';
+import { apiClient } from '@/lib/apiClient';
 
 /**
  * Hook pour récupérer le statut du bot
  */
-export const useBotStatus = (options: { enabled?: boolean } = {}) => {
-  const { enabled = true } = options;
-
+export const useBotStatus = () => {
   return useQuery({
-    queryKey: ['bot', 'status'],
-    queryFn: () => apiClient.getBotStatus(),
-    enabled,
-    staleTime: 5 * 1000, // 5 secondes
-    refetchInterval: 10 * 1000, // Actualiser toutes les 10 secondes
+    queryKey: ['botStatus'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/v1/bot/status');
+      return response.data;
+    },
+    refetchInterval: 5000,
   });
 };
 

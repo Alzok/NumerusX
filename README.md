@@ -1,154 +1,205 @@
-# 🚀 NumerusX
+# 🚀 NumerusX - AI Trading Bot for Solana
 
-**Bot de trading crypto alimenté par IA pour Solana** 
+NumerusX is an advanced AI-powered cryptocurrency trading bot specifically designed for the Solana ecosystem. It leverages Google's Gemini 2.5 Flash AI model and Jupiter DEX v6 for intelligent, automated trading operations.
 
-<div align="center">
+## ✨ Key Features
 
-![Status](https://img.shields.io/badge/Backend-95%25_Complete-green)
-![Status](https://img.shields.io/badge/Frontend-30%25_Progress-orange)
-![Status](https://img.shields.io/badge/Production-10%25_TODO-red)
+- **🤖 AI-Powered Trading**: Utilizes Gemini 2.5 Flash for intelligent market analysis and decision-making
+- **⚡ Solana Integration**: Native support for Solana blockchain with Jupiter DEX v6
+- **📊 Real-time Dashboard**: Modern interface with live portfolio tracking and trade monitoring
+- **🔐 Secure Authentication**: Auth0 integration with JWT token management
+- **💬 Real-time Communication**: WebSocket integration for live updates
+- **🎨 Modern UI**: Built with shadcn/ui components for professional appearance
+- **📱 Responsive Design**: Mobile-first approach with desktop optimization
 
-</div>
+## 🏗️ Technical Architecture
 
-## 🎯 Qu'est-ce que NumerusX ?
+### Backend (FastAPI + Python)
+- **FastAPI**: High-performance web framework
+- **Gemini 2.5 Flash**: AI decision-making engine
+- **Jupiter SDK v6**: DEX integration for Solana
+- **Socket.io**: Real-time communication
+- **SQLite**: Local database storage
+- **JWT Authentication**: Secure API access
 
-Un bot de trading automatisé qui utilise **l'intelligence artificielle** (Gemini 2.5 Flash) pour analyser les marchés crypto et exécuter des trades sur **Solana** via Jupiter DEX.
+### Frontend (React + TypeScript)
+- **React 18**: Modern component-based UI
+- **TypeScript**: Type-safe development
+- **shadcn/ui**: Professional component library (42 components)
+- **TanStack Query**: Efficient data fetching and caching
+- **Auth0**: Authentication provider
+- **Chart.js**: Data visualization
+- **Tailwind CSS**: Utility-first styling
 
-### ✨ Fonctionnalités Principales
+## 🎨 UI Components & Design System
 
-- 🤖 **Agent IA** - Décisions de trading intelligentes
-- 📊 **Analyse technique** - RSI, MACD, Bollinger Bands
-- 🔒 **Gestion des risques** - Stop-loss automatique et position sizing
-- ⚡ **Temps réel** - Interface Socket.io pour suivi live
-- 🛡️ **Sécurité** - Vérification anti-rugpull et analyse des tokens
+### Modern Interface with shadcn/ui
+- **Design Style**: New York theme with zinc base color
+- **Components**: 42 shadcn/ui components integrated
+  - Navigation: Sidebar, Navigation Menu, Breadcrumb
+  - Display: Card, Badge, Progress, Chart, Skeleton
+  - Forms: Input, Select, Button, Switch, Slider
+  - Feedback: Alert, Toast (Sonner), Dialog, Sheet
+  - Layout: Aspect Ratio, Separator, Resizable
 
-## 🚦 Installation Ultra-Simple
+### Key Pages
+1. **Dashboard**: Real-time KPIs, portfolio evolution, recent activity
+2. **Trading**: Trade execution interface with statistics
+3. **Bot Control**: AI agent management and configuration
+4. **Portfolio**: Asset management and position tracking
+5. **Settings**: User preferences and bot configuration
 
-### Prérequis
-- Docker + Docker Compose
-- Clés API (Google Gemini, Auth0)
+## 🚀 Quick Start
 
-### Installation
+### Prerequisites
+- Python 3.8+
+- Node.js 18+
+- npm or yarn
+- Auth0 account (for authentication)
+
+### Backend Setup
 ```bash
-# 1. Cloner le projet
-git clone <repository-url>
-cd NumerusX
+# Install dependencies
+pip install -r requirements.txt
 
-# 2. Configurer vos clés
-cp .env .env.local
-# Éditer .env.local avec vos vraies clés
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your configuration
 
-# 3. Démarrer
-docker compose up
+# Run the backend
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**C'est tout ! 🎉**
-
-### 🌐 URLs
-- **Interface**: http://localhost:5173
-- **API**: http://localhost:8000
-- **Documentation**: http://localhost:8000/docs
-
-## ⚙️ Configuration Rapide
-
-### Backend (.env.local)
+### Frontend Setup
 ```bash
-# APIs (OBLIGATOIRE)
-GOOGLE_API_KEY=your-google-api-key
-JUPITER_API_KEY=your-jupiter-api-key  
-SOLANA_PRIVATE_KEY_BS58=your-solana-key
+cd numerusx-ui
 
-# Auth0 (OBLIGATOIRE)
-AUTH_PROVIDER_JWKS_URI=https://domain.auth0.com/.well-known/jwks.json
-AUTH_PROVIDER_ISSUER=https://domain.auth0.com/
-AUTH_PROVIDER_AUDIENCE=your-api-identifier
+# Install dependencies
+npm install
 
-# Sécurité (OBLIGATOIRE)
-JWT_SECRET_KEY=your-jwt-secret
-MASTER_ENCRYPTION_KEY=your-encryption-key
+# Set up environment variables
+cp .env.example .env
+# Edit .env with your Auth0 configuration
+
+# Run the frontend
+npm run dev
 ```
 
-### Frontend (numerusx-ui/.env)
+### Docker Setup
 ```bash
-# Auth0 Frontend
-VITE_APP_AUTH0_DOMAIN=domain.auth0.com
-VITE_APP_AUTH0_CLIENT_ID=your-client-id
-VITE_APP_AUTH0_AUDIENCE=your-api-identifier
-
-# Backend
-VITE_APP_BACKEND_URL=http://localhost:8000
-VITE_APP_SOCKET_URL=http://localhost:8000
+# Build and run both services
+docker-compose up --build
 ```
 
-## 🏗️ Architecture
+## 🔧 Configuration
 
-```mermaid
-graph LR
-    A[🎨 React UI] --> B[🔗 FastAPI Backend]
-    B --> C[🤖 Agent IA Gemini]
-    B --> D[📊 Jupiter DEX]
-    B --> E[💾 SQLite DB]
-    B --> F[⚡ Socket.io]
+### Environment Variables
+
+#### Backend (.env)
+```bash
+# AI Configuration
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+
+# Jupiter DEX
+JUPITER_API_URL=https://quote-api.jup.ag/v6
+
+# Authentication
+AUTH0_DOMAIN=your_auth0_domain
+AUTH0_API_AUDIENCE=your_api_identifier
+
+# Database
+DATABASE_URL=sqlite:///./numerusx.db
 ```
 
-## 📋 Roadmap
+#### Frontend (numerusx-ui/.env)
+```bash
+VITE_AUTH0_DOMAIN=your_auth0_domain
+VITE_AUTH0_CLIENT_ID=your_client_id
+VITE_AUTH0_AUDIENCE=your_api_identifier
+VITE_API_BASE_URL=http://localhost:8000
+```
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| **Backend** | ✅ 95% | API, IA, Trading, Database |
-| **Frontend** | ⚠️ 30% | Interface React (EN COURS) |
-| **Production** | ❌ 10% | Monitoring, CI/CD, Analytics |
+## 📊 API Documentation
 
-**🚨 PRIORITÉ**: Frontend (voir `todo/2-FRONTEND-CRITICAL.md`)
+### Available Endpoints
+- **GET /api/v1/bot/status** - Bot status and statistics
+- **POST /api/v1/bot/start** - Start the trading bot
+- **POST /api/v1/bot/stop** - Stop the trading bot
+- **GET /api/v1/portfolio/snapshot** - Current portfolio state
+- **GET /api/v1/trades** - Trading history
+- **POST /api/v1/trades/manual** - Execute manual trade
 
-## 🛠️ Stack Technique
+### WebSocket Events
+- `bot_status_update` - Real-time bot status changes
+- `portfolio_update` - Portfolio value updates
+- `new_trade_executed` - Trade execution notifications
+- `ai_decision_update` - AI decision explanations
+- `market_data_update` - Market data updates
 
-### Backend
-- **FastAPI** - API REST haute performance
-- **Socket.io** - Communication temps réel  
-- **SQLite** - Base de données simple
-- **Gemini 2.5 Flash** - Intelligence artificielle
-- **Jupiter SDK v6** - Trading sur Solana
+## 🔐 Security Features
 
-### Frontend  
-- **React 18** - Interface utilisateur
-- **TypeScript** - Type safety
-- **Radix UI** - Composants accessible
-- **Tailwind CSS** - Styling moderne
-- **Auth0** - Authentification
+- **JWT Authentication**: Secure API access with Auth0
+- **Token Validation**: RS256 verification with PyJWKClient
+- **API Rate Limiting**: Built-in request throttling
+- **Secure Headers**: CORS and security headers configured
+- **Environment Isolation**: Separate development/production configs
 
-## 📖 Documentation
+## 📈 Trading Features
 
-- `todo/0-architecte.md` - Architecture complète
-- `todo/1-BACKEND-DONE.md` - ✅ Backend terminé
-- `todo/2-FRONTEND-CRITICAL.md` - 🚨 Frontend à faire
-- `todo/3-PRODUCTION-FEATURES.md` - 🚀 Fonctionnalités avancées
+### AI Decision Making
+- Market trend analysis using Gemini 2.5 Flash
+- Risk assessment and position sizing
+- Entry and exit point optimization
+- Portfolio rebalancing strategies
 
-## 🆘 Problèmes Fréquents
+### Jupiter DEX Integration
+- Real-time price fetching
+- Slippage protection
+- Transaction optimization
+- Multi-hop routing support
+
+## 🧪 Testing
 
 ```bash
-# Auth0 non configuré
-grep "DUMMY" .env  # Doit être vide
+# Backend tests
+python -m pytest tests/
 
-# Frontend ne démarre pas
-cd numerusx-ui && npm install
-
-# Docker permission denied
-sudo docker compose up
+# Frontend tests
+cd numerusx-ui
+npm run test
 ```
 
-## 🤝 Contribution
+## 📦 Deployment
 
-1. Frontend en priorité (composants React + Auth0)
-2. Tests et optimisations
-3. Fonctionnalités avancées
+### Production Deployment
+1. Configure production environment variables
+2. Build frontend: `npm run build`
+3. Deploy using Docker: `docker-compose -f docker-compose.prod.yml up`
 
-## ⚖️ Licence
+### Environment Configuration
+- Development: Auto-reload enabled, debug logs
+- Production: Optimized builds, error monitoring
 
-MIT License - Voir LICENSE
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🆘 Support
+
+For support and questions:
+- Create an issue in the GitHub repository
+- Check the documentation in the `/docs` folder
+- Review the API documentation at `/docs` endpoint
 
 ---
 
-<div align="center">
-<strong>🚀 Prêt à trader avec l'IA ? Configurez vos clés et lancez `docker compose up` !</strong>
-</div>
+**⚠️ Disclaimer**: This trading bot is for educational and experimental purposes. Always test thoroughly before using with real funds. Cryptocurrency trading involves significant risk.
