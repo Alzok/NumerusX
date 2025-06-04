@@ -32,3 +32,16 @@ python-socketio[fastapi]>=5.8.0
 fastapi-limiter>=0.1.5
 aiohttp>=3.9.1
 async-timeout>=4.0.3
+
+# Testing dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0
+httpx>=0.24.0
+
+# JWT dependencies
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Rate limiting
+fastapi-limiter>=0.1.5

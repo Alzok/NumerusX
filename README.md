@@ -191,11 +191,99 @@ NumerusX/
 │   ├── frontend/             # Dockerfile for frontend (React app)
 │   └── docker-compose.yml    # Docker container orchestration
 ├── todo/                     # Task lists and planning documents
-├── .env.example              # Example environment variables
+│   ├── TODO-MASTER-ANALYSE-2024.md  # 🆕 ROADMAP PRINCIPAL - Phases A, B, C structurées
+│   ├── ISSUES-TECHNIQUES-CRITIQUES.md # 🆕 PROBLÈMES URGENTS - Solutions détaillées  
+│   ├── DEPENDENCIES-MANQUANTES.md   # 🆕 PACKAGES à installer immédiatement
+│   ├── DEPRECATED-OLD-TODOS.md      # 📚 Archive anciens TODOs (référence)
+│   ├── 01-todo-core.md              # ✅ Largement complété (archived)
+│   ├── 01-todo-database.md          # ✅ Implémentation terminée (archived)
+│   └── [autres fichiers TODO...]    # 📚 Voir DEPRECATED-OLD-TODOS.md
+├── .env.example              # Example environment variables (à créer)
 ├── .gitignore
 ├── logo.jpg
 ├── README.md
 └── requirements.txt        # Python package dependencies (for backend)
+
+## Installation
+
+### Prérequis
+- **Docker** et **Docker Compose**
+- **Git**
+
+### Installation Rapide
+```bash
+# 1. Cloner le projet
+git clone <repository-url>
+cd NumerusX
+
+# 2. Configurer les variables d'environnement  
+cp .env .env.local
+
+# Créer le fichier frontend .env (copier le contenu depuis la section Configuration)
+touch numerusx-ui/.env
+
+# 3. Éditer vos clés API dans .env.local et numerusx-ui/.env
+# (Voir section Configuration ci-dessous)
+
+# 4. Démarrer l'application
+docker compose up
+```
+
+### Configuration
+
+#### Backend (.env)
+```bash
+# APIs externes (OBLIGATOIRE)
+GOOGLE_API_KEY=your-google-gemini-api-key
+JUPITER_API_KEY=your-jupiter-api-key  
+SOLANA_PRIVATE_KEY_BS58=your-solana-private-key
+
+# Auth0 Backend (OBLIGATOIRE)
+AUTH_PROVIDER_JWKS_URI=https://your-domain.auth0.com/.well-known/jwks.json
+AUTH_PROVIDER_ISSUER=https://your-domain.auth0.com/
+AUTH_PROVIDER_AUDIENCE=your-api-identifier
+
+# Sécurité
+JWT_SECRET_KEY=your-jwt-secret-key
+MASTER_ENCRYPTION_KEY=your-32-char-encryption-key
+```
+
+#### Frontend (numerusx-ui/.env)
+```bash
+VITE_APP_AUTH0_DOMAIN=your-domain.auth0.com
+VITE_APP_AUTH0_CLIENT_ID=your-auth0-client-id
+VITE_APP_AUTH0_AUDIENCE=your-api-identifier
+VITE_APP_SOCKET_URL=http://localhost:8000
+```
+
+### URLs
+- **Interface**: http://localhost:5173
+- **API**: http://localhost:8000
+- **Documentation API**: http://localhost:8000/docs
+
+### Problèmes Fréquents
+
+#### Erreur "File .env not found"
+```bash
+# Copier le fichier .env existant
+cp .env .env.local
+
+# Ou créer depuis zero avec vos clés
+touch .env.local
+```
+
+#### Frontend ne démarre pas
+```bash
+# Créer le fichier .env frontend manquant
+touch numerusx-ui/.env
+# Puis éditer avec la configuration Auth0 (voir section Configuration)
+```
+
+#### Docker permission denied
+```bash
+sudo chmod +x Docker/backend/Dockerfile Docker/frontend/Dockerfile
+sudo docker compose up
+```
 ```
 
 ## Core Components In-Depth (Reflecting AI Agent Architecture)

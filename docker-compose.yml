@@ -1,0 +1,127 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Docker/backend/Dockerfile
+    container_name: numerusx-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./keys:/app/keys
+      - ./models:/app/models
+      # Mount .env file directly for backend to use
+      - ./.env:/app/.env 
+    env_file:
+      - ./.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/system/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - numerusx-network
+    # Command is defined in Dockerfile, but can be overridden here if needed
+    # command: uvicorn app.main:final_asgi_app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
+
+  frontend:
+    build:
+      context: ./Docker
+      dockerfile: frontend/Dockerfile
+    container_name: numerusx-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      # Mount the entire numerusx-ui directory from host to container
+      # This allows the init-frontend.sh script to create files on the host
+      # and for live reloading during development.
+      - ./numerusx-ui:/app/numerusx-ui
+      # Mount logo if needed
+      - ./logo.jpg:/app/logo.jpg
+      # Mount .env files for frontend
+      - ./numerusx-ui/.env:/app/numerusx-ui/.env
+    environment:
+      - NODE_ENV=development
+      - VITE_API_URL=http://backend:8000
+      - VITE_WS_URL=ws://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5173"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - numerusx-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: numerusx-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --save 60 1
+      --save 300 10
+      --save 900 100
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - numerusx-network
+
+  # Optional: Add nginx for production
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: numerusx-nginx
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./nginx/ssl:/etc/nginx/ssl:ro
+  #     - ../numerusx-ui/dist:/usr/share/nginx/html:ro
+  #   depends_on:
+  #     - backend
+  #     - frontend
+  #   healthcheck:
+  #     test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #   networks:
+  #     - numerusx-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  numerusx-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

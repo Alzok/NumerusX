@@ -1,3 +1,5 @@
+# This file is used to ensure the directory is tracked by Git.
+
 // This is a placeholder file for the app directory
 // Content for Redux store, slices, etc., will be added later.
 export {}; 

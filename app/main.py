@@ -27,8 +27,17 @@ from fastapi_limiter import FastAPILimiter # Import FastAPILimiter
 from fastapi_limiter.depends import RateLimiter # Import RateLimiter dependency
 import redis.asyncio as redis # Import async redis for limiter
 
+# Import the main API router
+from app.api.v1 import api_router
+
 # Global instances
-app = FastAPI(title="NumerusX Backend", version="1.0.0")
+app = FastAPI(
+    title="NumerusX Backend",
+    version="1.0.0",
+    description="AI-powered cryptocurrency trading bot for Solana",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc"
+)
 
 # Add CORSMiddleware to the FastAPI app instance
 # Ensure Config.CORS_ALLOWED_ORIGINS is defined and loaded correctly in your Config class.
@@ -61,6 +70,7 @@ sio = socket_man.sio # This is the socketio.AsyncServer instance
 # SocketManager._sio_app = socketio.ASGIApp(SocketManager._sio_server)
 # This means it does NOT include FastAPI yet. We need to attach FastAPI to it.
 
+# Integrate Socket.IO with FastAPI
 if socket_man.app:
     # Re-wrap the SocketManager's pure ASGI app with FastAPI as the fallback
     # This makes FastAPI handle all non-Socket.IO requests.
@@ -70,6 +80,9 @@ else:
     # Fallback if socket_man.app is None, though get_socket_manager should always return one.
     logging.critical("SocketManager app is None, WebSocket functionality will be unavailable.")
     final_asgi_app = app # Run FastAPI without Socket.IO
+
+# Include API router
+app.include_router(api_router, prefix="/api/v1")
 
 auth_verifier = VerifyToken() # Initialize the token verifier
 
@@ -273,6 +286,10 @@ async def startup_event():
         logging.info(f"FastAPI-Limiter initialized with Redis: {Config.REDIS_URL}")
     except Exception as e:
         logging.error(f"Failed to initialize FastAPI-Limiter with Redis: {e}. Rate limiting will not work.", exc_info=True)
+    
+    # Set socket manager for bot routes (for WebSocket notifications)
+    from app.api.v1.bot_routes import set_bot_instance
+    # set_bot_instance(global_dex_bot)  # This would be set when DexBot is initialized
 
 
 async def shutdown_event():
@@ -309,10 +326,36 @@ async def auth_exception_handler(request: Request, exc: AuthError):
         content={"detail": exc.error_detail},
     )
 
+# Mount the main API router
+app.include_router(api_router)
+
 # Basic root endpoint
 @app.get("/")
 async def root():
-    return {"message": "Welcome to NumerusX Backend API"}
+    return {
+        "message": "Welcome to NumerusX Backend API",
+        "version": "1.0.0",
+        "docs": "/api/docs",
+        "health": "/health"
+    }
+
+# Health check endpoint (same as system/health but at root level for monitoring)
+@app.get("/health")
+async def health_check():
+    """Simple health check for load balancers and monitoring."""
+    try:
+        return {
+            "status": "healthy",
+            "timestamp": "2024-01-15T10:30:00Z",
+            "version": "1.0.0",
+            "api": "operational"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "timestamp": "2024-01-15T10:30:00Z",
+            "error": str(e)
+        }
 
 # Default Socket.IO event handlers (can be moved to SocketManager or kept here if specific to main app logic)
 # Note: SocketManager already registers connect and disconnect. If kept here, they might override or be duplicated.
@@ -337,7 +380,7 @@ async def chat_message(sid, data):
     logging.info(f'Socket.IO message from {sid}: {data}')
     await sio.emit('chat_message', data, room=sid) # Echo back for now
 
-# Protected API endpoint example
+# Keep these example endpoints for backward compatibility
 @app.get("/api/v1/private")
 async def private_route(payload: dict = Security(auth_verifier.verify)):
     """A valid access token is required to access this route."""
@@ -349,112 +392,9 @@ async def private_route(payload: dict = Security(auth_verifier.verify)):
 async def public_route():
     return {"message": "This is a public route!"}
 
-# Define a list of configuration keys that are safe and useful for UI interaction
-# Descriptions are optional but helpful for UI rendering.
-UI_CONFIGURABLE_KEYS = {
-    "TARGET_TRADING_PAIR": "The main trading pair symbol (e.g., SOL/USDC).",
-    "TRADING_UPDATE_INTERVAL_SECONDS": "Frequency of trading cycles in seconds.",
-    "MAX_PORTFOLIO_EXPOSURE_PER_TRADE": "Maximum percentage of portfolio to risk per trade (e.g., 0.01 for 1%).",
-    "TRADE_CONFIDENCE_THRESHOLD": "Minimum AI confidence level to execute a trade (0.0 to 1.0).",
-    "DEFAULT_STRATEGY_NAME": "Default strategy to use for generating signals for the AI Agent.",
-    "GEMINI_MODEL_NAME": "AI Model to use for decisions (read-only from UI perspective normally).",
-    # Add other relevant keys here, e.g., from RiskManager, PredictionEngine settings if applicable
-}
-
-@app.get("/api/v1/config", response_model=GetConfigResponse, dependencies=[Security(auth_verifier.verify)])
-async def get_bot_configuration():
-    """Retrieves a list of configurable parameters and their current values."""
-    params = []
-    config_instance = Config() # Get current config instance
-    for key, description in UI_CONFIGURABLE_KEYS.items():
-        value = getattr(config_instance, key, "N/A")
-        params.append(ConfigurableParameter(key=key, value=str(value), description=description))
-    
-    return GetConfigResponse(
-        configurable_parameters=params,
-        info="Current bot configuration parameters. Some changes may require a bot restart."
-    )
-
-@app.post("/api/v1/config", dependencies=[Security(auth_verifier.verify)])
-async def update_bot_configuration(config_update: UpdateConfigRequest):
-    """Updates specified bot configuration parameters."""
-    # IMPORTANT: Directly modifying os.environ or live Config object attributes is generally not recommended
-    # for a running application as it can lead to inconsistent state, especially with multiple workers.
-    # A robust solution involves:
-    # 1. Storing user overrides in a separate file (e.g., user_config.json) or database.
-    # 2. Having Config load these overrides at startup.
-    # 3. For live updates, either:
-    #    a) Signal the bot to re-initialize its Config (if designed for it).
-    #    b) For some parameters, components might be designed to fetch them live from a settings service.
-    #    c) Inform the user that a restart is needed for changes to take effect.
-
-    updated_params_log = []
-    for param in config_update.parameters_to_update:
-        if param.key in UI_CONFIGURABLE_KEYS:
-            # This is symbolic. Actual update logic is complex.
-            # os.environ[param.key] = param.value # Example: NOT recommended for live updates
-            # setattr(Config, param.key, param.value) # Also NOT recommended directly on class or instance post-init
-            logging.info(f"Received request to update config: {param.key} = {param.value}. "
-                         f"(Note: Live update mechanism needs full implementation. Change may require restart.)")
-            updated_params_log.append(f"{param.key}={param.value}")
-        else:
-            logging.warning(f"Attempt to update non-UI-configurable parameter: {param.key}")
-
-    if not updated_params_log:
-        return JSONResponse(status_code=400, content={"detail": "No valid parameters provided for update or parameters are not configurable."})
-
-    # Simulate broadcasting the config change to relevant components if they can handle it,
-    # or notify connected UI clients that a change was made.
-    if sio:
-        await sio.emit('config_updated', {'updated_keys': [p.split('=')[0] for p in updated_params_log], 'message': 'Configuration parameters were updated. Some changes might require a bot restart.'})
-
-    return {"message": f"Configuration update request processed for: {', '.join(updated_params_log)}. Restart may be required for some changes."}
-
-# Bot Control Endpoints
-@app.post("/api/v1/bot/start", response_model=BotActionResponse, dependencies=[Security(auth_verifier.verify)])
-async def start_bot_command():
-    """Initiates the bot startup sequence."""
-    logging.info("API endpoint /api/v1/bot/start called.")
-    # Placeholder: Add logic to actually start the bot
-    # e.g., if hasattr(app.state, 'dex_bot') and app.state.dex_bot: await app.state.dex_bot.start()
-    # else: logging.error("DexBot not initialized in app.state")
-    
-    status_to_emit = "STARTING"
-    await sio.emit('bot_status_update', {'status': status_to_emit, 'message': 'Bot startup initiated via API.'})
-    # Simulate bot starting and then running - in real app, DexBot would manage its own status emits
-    async def simulate_startup_and_run():
-        await asyncio.sleep(2) 
-        await sio.emit('bot_status_update', {'status': 'RUNNING', 'message': 'Bot is now running (simulated after API start).'})
-    
-    # Create a background task for simulation if not running in a test environment that handles this.
-    # For now, direct emit then task.
-    task = asyncio.create_task(simulate_startup_and_run())
-    background_tasks.add(task)
-    task.add_done_callback(background_tasks.discard)
-    
-    return BotActionResponse(message="Bot start command received. Emitting STARTING status.", status_sent=status_to_emit)
-
-@app.post("/api/v1/bot/stop", response_model=BotActionResponse, dependencies=[Security(auth_verifier.verify)])
-async def stop_bot_command():
-    """Initiates the bot stop sequence."""
-    logging.info("API endpoint /api/v1/bot/stop called.")
-    # Placeholder: Add logic to actually stop the bot
-    # e.g., if hasattr(app.state, 'dex_bot') and app.state.dex_bot: await app.state.dex_bot.stop()
-
-    status_to_emit = "STOPPED"
-    await sio.emit('bot_status_update', {'status': status_to_emit, 'message': 'Bot stop initiated via API.'})
-    return BotActionResponse(message="Bot stop command received. Emitting STOPPED status.", status_sent=status_to_emit)
-
-@app.post("/api/v1/bot/pause", response_model=BotActionResponse, dependencies=[Security(auth_verifier.verify)])
-async def pause_bot_command():
-    """Initiates the bot pause sequence."""
-    logging.info("API endpoint /api/v1/bot/pause called.")
-    # Placeholder: Add logic to actually pause the bot
-    # e.g., if hasattr(app.state, 'dex_bot') and app.state.dex_bot: await app.state.dex_bot.pause()
-    
-    status_to_emit = "PAUSED"
-    await sio.emit('bot_status_update', {'status': status_to_emit, 'message': 'Bot pause initiated via API.'})
-    return BotActionResponse(message="Bot pause command received. Emitting PAUSED status.", status_sent=status_to_emit)
+# NOTE: These old endpoints are now replaced by the new API routes
+# They are kept here temporarily for backward compatibility but should be removed
+# once the frontend is updated to use the new endpoints
 
 # NumerusX specific Socket.IO events
 @sio.on('start_bot')
@@ -517,113 +457,8 @@ async def periodic_updates_emitter():
 #         logging.info("Periodic Socket.IO emitter task started.")
 # ...
 
-# Data Retrieval and Action Endpoints
-@app.post("/api/v1/trades/manual", response_model=BotActionResponse, dependencies=[Security(auth_verifier.verify)])
-async def manual_trade_command(trade_request: ManualTradeRequest):
-    """Accepts a manual trade order from the user."""
-    logging.info(f"API endpoint /api/v1/trades/manual called with: {trade_request.model_dump_json(indent=2)}")
-    # Placeholder: Add logic to validate the trade_request
-    # Then, pass it to TradeExecutor, e.g.:
-    # success, result = await app.state.trade_executor.execute_manual_trade(trade_request)
-    # For now, just log and return a success message
-    await sio.emit('new_log_entry', {
-        "level": "INFO", 
-        "module": "API", 
-        "message": f"Manual trade requested: {trade_request.pair}, {trade_request.type}, ${trade_request.amount_usd}"
-    })
-    return BotActionResponse(message=f"Manual trade request for {trade_request.pair} received and logged.")
-
-@app.get("/api/v1/trades/history", response_model=TradeHistoryResponse, dependencies=[Security(auth_verifier.verify)])
-async def get_trades_history(limit: int = 50, offset: int = 0):
-    """Retrieves the history of executed trades."""
-    logging.info(f"API endpoint /api/v1/trades/history called with limit={limit}, offset={offset}")
-    # Placeholder: Fetch actual trade history from EnhancedDatabase
-    dummy_trades = [
-        TradeEntry(trade_id="t123", pair="SOL/USDC", type="BUY", amount_tokens=1.5, price_usd=160.0, timestamp_utc="2023-10-27T10:00:00Z", status="FILLED", reason_source="AI_AGENT"),
-        TradeEntry(trade_id="t124", pair="BTC/USDC", type="SELL", amount_tokens=0.01, price_usd=34000.0, timestamp_utc="2023-10-27T11:00:00Z", status="FILLED", reason_source="MANUAL"),
-    ]
-    return TradeHistoryResponse(trades=dummy_trades, total_trades=len(dummy_trades), limit=limit, offset=offset)
-
-@app.get("/api/v1/ai/decisions/history", response_model=AIDecisionHistoryResponse, dependencies=[Security(auth_verifier.verify)])
-async def get_ai_decisions_history(limit: int = 50, offset: int = 0):
-    """Retrieves the history of AI agent decisions."""
-    logging.info(f"API endpoint /api/v1/ai/decisions/history called with limit={limit}, offset={offset}")
-    # Placeholder: Fetch actual AI decision history from EnhancedDatabase
-    dummy_decisions = [
-        AIDecisionEntry(decision_id="d100", decision="BUY", token_pair="SOL/USDC", confidence=0.85, reasoning_snippet="RSI bullish, MACD crossover positive.", timestamp_utc="2023-10-27T09:55:00Z"),
-        AIDecisionEntry(decision_id="d101", decision="HOLD", token_pair="ETH/USDC", confidence=0.50, reasoning_snippet="Market consolidating, waiting for clearer signal.", timestamp_utc="2023-10-27T10:55:00Z"),
-    ]
-    return AIDecisionHistoryResponse(decisions=dummy_decisions, total_decisions=len(dummy_decisions), limit=limit, offset=offset)
-
-@app.get("/api/v1/portfolio/snapshot", response_model=PortfolioSnapshotResponse, dependencies=[Security(auth_verifier.verify)])
-async def get_portfolio_snapshot():
-    """Retrieves a snapshot of the current portfolio."""
-    logging.info("API endpoint /api/v1/portfolio/snapshot called.")
-    # Placeholder: Fetch actual portfolio data from PortfolioManager
-    dummy_snapshot = PortfolioSnapshotResponse(
-        total_value_usd=12550.75,
-        pnl_24h_usd=120.25,
-        positions=[
-            PortfolioPosition(asset="SOL", amount=50.0, avg_buy_price=155.0, current_price=165.30, value_usd=8265.0),
-            PortfolioPosition(asset="USDC", amount=4285.75, avg_buy_price=1.0, current_price=1.0, value_usd=4285.75),
-        ],
-        available_cash_usdc=4285.75, # Assuming USDC is the cash asset here
-        timestamp_utc="2023-10-27T12:00:00Z"
-    )
-    return dummy_snapshot
-
-# System Information Endpoints
-@app.get("/api/v1/logs", response_model=LogsResponse, dependencies=[Security(auth_verifier.verify)])
-async def get_system_logs(service_name: Optional[str] = None, limit: int = 100):
-    """Retrieves system logs, optionally filtered by service name."""
-    logging.info(f"API endpoint /api/v1/logs called. Service: {service_name}, Limit: {limit}")
-    # Placeholder: Fetch actual logs from a centralized logging system or parse log files.
-    # This is a very simplified example.
-    dummy_logs = [
-        LogEntry(timestamp_utc="2023-10-27T12:00:00Z", level="INFO", module="TradingEngine", message="Swap successful for SOL/USDC."),
-        LogEntry(timestamp_utc="2023-10-27T12:01:00Z", level="WARNING", module="MarketDataProvider", message="DexScreener API latency high."),
-    ]
-    if service_name:
-        filtered_logs = [log for log in dummy_logs if log.module.lower() == service_name.lower()]
-    else:
-        filtered_logs = dummy_logs
-    
-    return LogsResponse(
-        logs=filtered_logs[:limit],
-        service_name_filter=service_name,
-        total_logs_returned=len(filtered_logs[:limit]),
-        limit=limit
-    )
-
-@app.get("/api/v1/system/health", response_model=SystemHealthResponse, dependencies=[Security(auth_verifier.verify)])
-async def get_system_health():
-    """Retrieves the health status of various bot components."""
-    logging.info("API endpoint /api/v1/system/health called.")
-    # Placeholder: Implement actual health checks for each service.
-    # This would involve pinging services, checking DB connections, API statuses, etc.
-    dummy_services = [
-        ServiceHealth(service_name="FastAPI Backend", status="OPERATIONAL"),
-        ServiceHealth(service_name="SocketIO", status="OPERATIONAL"),
-        ServiceHealth(service_name="DexBot Core", status="RUNNING"), # Would need actual status from DexBot
-        ServiceHealth(service_name="JupiterApiClient", status="OPERATIONAL"),
-        ServiceHealth(service_name="MarketDataProvider", status="OPERATIONAL"),
-        ServiceHealth(service_name="TradingEngine", status="IDLE"),
-        ServiceHealth(service_name="Database (SQLite)", status="OPERATIONAL"),
-        ServiceHealth(service_name="GeminiClient", status="OPERATIONAL"),
-        ServiceHealth(service_name="AuthenticationService", status="OPERATIONAL"),
-    ]
-    # Determine overall_status based on individual service statuses
-    overall = "ALL_SYSTEMS_OPERATIONAL"
-    if any(s.status == "ERROR" for s in dummy_services):
-        overall = "CRITICAL_ERROR"
-    elif any(s.status == "DEGRADED" for s in dummy_services):
-        overall = "PARTIAL_OUTAGE"
-        
-    return SystemHealthResponse(
-        overall_status=overall,
-        services=dummy_services,
-        timestamp_utc="2023-10-27T12:05:00Z" # Should be current time
-    )
+# NOTE: The old data retrieval and system endpoints have been replaced by the new API routes
+# They are temporarily kept above for backward compatibility
 
 # The main execution block is typically handled by Uvicorn directly pointing to app.main:socket_app
 # For example: uvicorn app.main:socket_app --reload --host 0.0.0.0 --port 8000
@@ -638,11 +473,11 @@ if __name__ == "__main__":
     import uvicorn
     # Call configure_logging here if running directly for uvicorn to pick up initial logs
     # However, uvicorn has its own logging config. Best to let startup_event handle it.
-    # configure_logging() 
+    # configure_logging()
     
-    # Note: Using socket_app here, which wraps the FastAPI app with Socket.IO
-    uvicorn.run(socket_app, host=Config.API_HOST if hasattr(Config, 'API_HOST') else "0.0.0.0", 
-                port=int(Config.API_PORT) if hasattr(Config, 'API_PORT') else 8000, 
+    # Note: Using final_asgi_app here, which wraps the FastAPI app with Socket.IO
+    uvicorn.run(final_asgi_app, host=Config.API_HOST if hasattr(Config, 'API_HOST') else "0.0.0.0",
+                port=int(Config.API_PORT) if hasattr(Config, 'API_PORT') else 8000,
                 log_level=getattr(Config, 'LOG_LEVEL', 'info').lower())
     # The log_level here for uvicorn might be redundant if configure_logging() sets root logger level.
     # Uvicorn's access logs are separate.

@@ -37,6 +37,7 @@ from app.models.ai_inputs import (
     SecurityCheckerInput,
     TokenSecurityRisk
 )
+from app.socket_manager import get_socket_manager
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,14 @@ class DexBot:
         except Exception as e:
             logger.critical(f"Failed to initialize AIAgent: {e}", exc_info=True)
             raise RuntimeError("DexBot AIAgent initialization failed.") from e
+        
+        # Initialize Socket.io manager
+        try:
+            self.socket_manager = get_socket_manager()
+            logger.info("Socket.io manager initialized successfully")
+        except Exception as e:
+            logger.error(f"Error initializing Socket.io manager: {e}")
+            self.socket_manager = None
         
         self.performance_monitor = PerformanceMonitor() # Keep for now
         # Initial portfolio value tracking will be in an async setup method
@@ -504,24 +513,45 @@ class DexBot:
             # AIAgent.decide_trade now expects an AggregatedInputs object
             ai_decision_dict = await self.ai_agent.decide_trade(aggregated_inputs_model)
 
-            # Log the AI's decision and reasoning (regardless of action)
+            # Record the AI's decision in database
             try:
-                decision_log_payload = {
+                decision_data = {
+                    "decision_id": aggregated_inputs_model.request_id,
                     "timestamp_utc": datetime.utcnow().isoformat(),
-                    "request_id": aggregated_inputs_model.request_id, # Use the one from inputs
-                    "target_pair": current_pair_symbol_str,
-                    "decision": ai_decision_dict.get("decision"),
+                    "decision_type": ai_decision_dict.get("decision", "HOLD"),
+                    "token_pair": current_pair_symbol_str,
                     "amount_usd": ai_decision_dict.get("amount_usd"),
-                    "confidence": ai_decision_dict.get("confidence"),
+                    "confidence": ai_decision_dict.get("confidence", 0.0),
                     "stop_loss_price": ai_decision_dict.get("stop_loss_price"),
                     "take_profit_price": ai_decision_dict.get("take_profit_price"),
-                    "reasoning": ai_decision_dict.get("reasoning"),
-                    "gemini_usage_metadata": ai_decision_dict.get("usage_metadata") # If AIAgent adds this
+                    "reasoning": ai_decision_dict.get("reasoning", "No reasoning provided"),
+                    "full_prompt": ai_decision_dict.get("full_prompt"),
+                    "raw_response": ai_decision_dict.get("raw_response"),
+                    "aggregated_inputs": aggregated_inputs_model.model_dump(),
+                    "execution_status": "PENDING",
+                    "gemini_tokens_input": ai_decision_dict.get("usage_metadata", {}).get("prompt_token_count"),
+                    "gemini_tokens_output": ai_decision_dict.get("usage_metadata", {}).get("candidates_token_count"),
+                    "gemini_cost_usd": ai_decision_dict.get("usage_metadata", {}).get("total_cost_usd")
                 }
-                # TODO: Persist this to a dedicated ai_decisions table in the database
-                logger.info(f"AIAgent Decision Log: {json.dumps(decision_log_payload)}")
+                
+                decision_id = self.database.record_ai_decision(decision_data)
+                if decision_id:
+                    logger.info(f"AI decision recorded: {decision_id}")
+                    
+                    # Emit to Socket.io clients
+                    if hasattr(self, 'socket_manager'):
+                        await self.socket_manager.emit_ai_agent_decision({
+                            "decision_id": decision_id,
+                            "decision": ai_decision_dict.get("decision"),
+                            "confidence": ai_decision_dict.get("confidence"),
+                            "reasoning": ai_decision_dict.get("reasoning", "")[:100],  # Truncated for UI
+                            "token_pair": current_pair_symbol_str
+                        })
+                else:
+                    logger.error("Failed to record AI decision in database")
+                    
             except Exception as log_e:
-                logger.error(f"Error logging AI agent decision: {log_e}", exc_info=True)
+                logger.error(f"Error recording AI agent decision: {log_e}", exc_info=True)
 
             # 3. Execute trade if BUY or SELL decision
             if ai_decision_dict and ai_decision_dict.get("decision") in ["BUY", "SELL"]:

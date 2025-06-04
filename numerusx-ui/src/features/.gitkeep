@@ -1,3 +1,5 @@
+# This file is used to ensure the directory is tracked by Git.
+
 // This is a placeholder file for the features directory
 // Feature modules (Portfolio, Trading, AI Insights, etc.) will be placed here.
 export {}; 

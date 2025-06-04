@@ -2,7 +2,7 @@ from app.database import EnhancedDatabase
 from app.config import Config
 from app.market.market_data import MarketDataProvider # Import MarketDataProvider
 from app.utils.exceptions import DatabaseError # Assuming custom exception
-from typing import List, Dict, Optional, Any # Ensure Any is imported
+from typing import List, Dict, Optional, Any
 import logging
 import time # For timestamping
 import json
@@ -10,9 +10,9 @@ import json
 logger = logging.getLogger(__name__)
 
 class PortfolioManager:
-    def __init__(self, db_path: str, market_data_provider: MarketDataProvider):
+    def __init__(self, market_data_provider: MarketDataProvider, db_path: Optional[str] = None):
         """Manages the portfolio, including cash, positions, and overall value."""
-        self.db = EnhancedDatabase(db_path=db_path)
+        self.db = EnhancedDatabase(db_path)
         self.market_data_provider = market_data_provider
         self.base_currency = Config.BASE_ASSET # e.g., USDC mint address
         # Initialize cash balance from DB or config, for now, from config.
