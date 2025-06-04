@@ -3,4 +3,4 @@ data/
 *.db
 *.log
 venv/
-/node_modules/
+node_modules
