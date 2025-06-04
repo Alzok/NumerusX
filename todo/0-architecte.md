@@ -1,6 +1,23 @@
-# NumerusX - Architecture Applicative Globale pour Trading Haute Performance et Intelligent 🎯
+# 🏗️ NumerusX - Architecture & Roadmap
 
-**Objectif de ce document**: Définir une architecture applicative cohérente pour NumerusX, intégrant tous les modules et fonctionnalités envisagés, avec un **noyau décisionnel centralisé autour d'un Agent IA**. Ce guide est destiné aux IA de développement pour assurer la cohésion, la performance, et l'évolutivité du système, en particulier pour des opérations de trading rapides et intelligentes sur la blockchain Solana.
+## 📊 État Actuel (Juin 2025)
+
+**Backend**: ✅ 95% TERMINÉ  
+**Frontend**: ⚠️ 30% EN COURS  
+**Production**: ❌ 10% À FAIRE  
+
+➡️ **PRIORITÉ ABSOLUE**: Frontend (voir `2-FRONTEND-CRITICAL.md`)
+
+## 📋 TODO Simplifiés
+1. `1-BACKEND-DONE.md` - ✅ Backend terminé
+2. `2-FRONTEND-CRITICAL.md` - 🚨 URGENT: Interface utilisateur
+3. `3-PRODUCTION-FEATURES.md` - 🚀 Après frontend: Production & features avancées
+
+---
+
+# Architecture Applicative Globale 🎯
+
+**Objectif**: Architecture cohérente pour NumerusX avec **Agent IA décisionnel central** pour trading intelligent sur Solana.
 
 ## I. Principes Architecturaux Clés
 
