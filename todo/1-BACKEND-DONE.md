@@ -34,22 +34,33 @@
 - [x] Script validation imports
 - [x] Docker Compose fonctionnel
 
-### 🔧 Améliorations Mineures Restantes
+### 🔧 Améliorations Backend Restantes
 
-#### Performance
-- [ ] Cache Redis pour MarketData (optionnel)
-- [ ] Optimisation requêtes database
-- [ ] Rate limiting par utilisateur
+#### Performance (Optionnel)
+- [ ] Cache Redis pour MarketData implémentation  
+- [ ] Optimisation index database pour requêtes fréquentes
+- [ ] Rate limiting par utilisateur/endpoint
 
-#### Monitoring
-- [ ] Métriques Prometheus (optionnel)
-- [ ] Health checks avancés
-- [ ] Alertes automatiques
+#### Monitoring (Important pour Production)
+- [ ] Health checks détaillés (/health avec status services)
+- [ ] Métriques business (trades/min, portfolio value)
+- [ ] Logs structurés avec correlation IDs
 
-#### Sécurité
-- [ ] Refresh tokens JWT
-- [ ] Validation inputs plus stricte
-- [ ] Audit logs
+#### Sécurité (Important pour Production)  
+- [ ] Refresh tokens JWT + révocation
+- [ ] Validation inputs API plus stricte (Pydantic)
+- [ ] Audit logs pour actions critiques
+
+#### Fixes Urgents Détectés
+- [ ] 🚨 FIX: Auth0 RS256 ↔ Backend JWT HS256 incompatibilité
+- [ ] 🚨 FIX: Socket.io auth validation avec Auth0 tokens
+- [ ] 🚨 CLEANUP: Méthodes DEPRECATED dans TradeExecutor
+- [ ] REVIEW: Variables config orphelines (ENCRYPTION_KEY_OLD)
+
+#### Code Quality
+- [ ] Remove TODOs et DEPRECATED code (TradeExecutor.execute_trade_signal)
+- [ ] Standardiser logging levels (trop de DEBUG/WARNING)
+- [ ] Update docstrings pour fonctions modifiées
 
 ## Prochaine Étape
 

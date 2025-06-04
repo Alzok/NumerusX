@@ -14,9 +14,10 @@ fi
 # Ensure we're in the right directory
 cd $APP_DIR
 
-# Create package.json if it doesn't exist (for Docker development)
+# Use existing package.json or create a fallback
 if [ ! -f "$PACKAGE_JSON_PATH" ]; then
   echo "Creating complete package.json for NumerusX UI..."
+  echo "⚠️  Warning: Using fallback package.json. Consider using the real one from numerusx-ui/"
   cat > package.json << 'EOF'
 {
   "name": "numerusx-ui",
@@ -30,39 +31,65 @@ if [ ! -f "$PACKAGE_JSON_PATH" ]; then
     "preview": "vite preview"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "@reduxjs/toolkit": "^2.0.1",
-    "react-redux": "^9.0.4",
-    "react-router-dom": "^6.20.1",
-    "socket.io-client": "^4.7.2",
-    "axios": "^1.6.2",
-    "recharts": "^2.10.3",
-    "lucide-react": "^0.294.0",
-    "i18next": "^23.7.8",
-    "react-i18next": "^13.5.0",
-    "i18next-browser-languagedetector": "^7.2.0",
-    "i18next-http-backend": "^2.4.2",
-    "class-variance-authority": "^0.7.0",
-    "clsx": "^2.0.0",
-    "tailwind-merge": "^2.1.0",
+    "@auth0/auth0-react": "^2.2.4",
+    "@hookform/resolvers": "^3.3.4",
+    "@tanstack/react-table": "^8.11.8",
+    "@tanstack/react-query": "^5.17.15",
+    "axios": "^1.6.7",
+    "@radix-ui/react-accordion": "^1.1.2",
     "@radix-ui/react-alert-dialog": "^1.0.5",
+    "@radix-ui/react-aspect-ratio": "^1.0.3",
     "@radix-ui/react-avatar": "^1.0.4",
-    "@radix-ui/react-button": "^0.1.0",
-    "@radix-ui/react-card": "^0.1.0",
+    "@radix-ui/react-checkbox": "^1.0.4",
+    "@radix-ui/react-collapsible": "^1.0.3",
+    "@radix-ui/react-context-menu": "^2.1.5",
     "@radix-ui/react-dialog": "^1.0.5",
     "@radix-ui/react-dropdown-menu": "^2.0.6",
-    "@radix-ui/react-form": "^0.0.3",
-    "@radix-ui/react-input": "^1.0.4",
+    "@radix-ui/react-hover-card": "^1.0.7",
+    "@radix-ui/react-icons": "^1.3.0",
     "@radix-ui/react-label": "^2.0.2",
+    "@radix-ui/react-menubar": "^1.0.4",
+    "@radix-ui/react-navigation-menu": "^1.1.4",
     "@radix-ui/react-popover": "^1.0.7",
+    "@radix-ui/react-progress": "^1.0.3",
+    "@radix-ui/react-radio-group": "^1.1.3",
+    "@radix-ui/react-scroll-area": "^1.0.5",
     "@radix-ui/react-select": "^2.0.0",
     "@radix-ui/react-separator": "^1.0.3",
+    "@radix-ui/react-slider": "^1.1.2",
+    "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-switch": "^1.0.3",
-    "@radix-ui/react-table": "^0.1.0",
     "@radix-ui/react-tabs": "^1.0.4",
     "@radix-ui/react-toast": "^1.1.5",
-    "@radix-ui/react-tooltip": "^1.0.7"
+    "@radix-ui/react-toggle": "^1.0.3",
+    "@radix-ui/react-toggle-group": "^1.0.4",
+    "@radix-ui/react-tooltip": "^1.0.7",
+    "@reduxjs/toolkit": "^2.2.1",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.0",
+    "cmdk": "^0.2.1",
+    "date-fns": "^3.3.1",
+    "i18next": "^23.10.0",
+    "i18next-browser-languagedetector": "^7.2.0",
+    "i18next-http-backend": "^2.5.0",
+    "input-otp": "^1.2.4",
+    "lucide-react": "^0.344.0",
+    "next-themes": "^0.2.1",
+    "react": "^18.2.0",
+    "react-day-picker": "^8.10.0",
+    "react-dom": "^18.2.0",
+    "react-hook-form": "^7.51.0",
+    "react-i18next": "^14.0.5",
+    "react-redux": "^9.1.0",
+    "react-resizable-panels": "^2.0.12",
+    "react-router-dom": "^6.22.3",
+    "recharts": "^2.12.2",
+    "socket.io-client": "^4.7.4",
+    "sonner": "^1.4.3",
+    "tailwind-merge": "^2.2.1",
+    "tailwindcss-animate": "^1.0.7",
+    "vaul": "^0.9.0",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
@@ -98,6 +125,50 @@ if [ ! -d "node_modules" ] || [ "package.json" -nt "node_modules" ] || [ "packag
   npm install --legacy-peer-deps
   
   echo "Dependencies installed successfully!"
+
+  # Installer shadcn/ui automatiquement après npm install
+  echo "🎨 Installation de shadcn/ui..."
+  
+  # Créer components.json pour shadcn/ui
+  cat > components.json << 'EOF'
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "tailwind.config.js",
+    "css": "src/index.css",
+    "baseColor": "slate",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "aliases": {
+    "components": "src/components",
+    "utils": "src/lib/utils"
+  }
+}
+EOF
+
+  # Installer shadcn/ui CLI et composants essentiels
+  npx shadcn@latest init --yes --defaults || echo "⚠️ shadcn init failed but continuing..."
+  
+  # Installer les composants essentiels un par un pour éviter les erreurs
+  echo "📦 Installation des composants shadcn/ui..."
+  npx shadcn@latest add button --yes || echo "Button component failed"
+  npx shadcn@latest add input --yes || echo "Input component failed"
+  npx shadcn@latest add label --yes || echo "Label component failed"
+  npx shadcn@latest add card --yes || echo "Card component failed"
+  npx shadcn@latest add table --yes || echo "Table component failed"
+  npx shadcn@latest add badge --yes || echo "Badge component failed"
+  npx shadcn@latest add dialog --yes || echo "Dialog component failed"
+  npx shadcn@latest add sheet --yes || echo "Sheet component failed"
+  npx shadcn@latest add sidebar --yes || echo "Sidebar component failed"
+  npx shadcn@latest add breadcrumb --yes || echo "Breadcrumb component failed"
+  npx shadcn@latest add separator --yes || echo "Separator component failed"
+  
+  echo "✅ shadcn/ui installation completed!"
+  
 else
   echo "Dependencies are up to date."
 fi
@@ -107,7 +178,7 @@ echo "Verifying critical dependencies..."
 MISSING_DEPS=""
 
 # Check for critical dependencies
-for dep in "react" "react-dom" "react-router-dom" "socket.io-client" "@reduxjs/toolkit" "react-redux" "vite"; do
+for dep in "react" "react-dom" "react-router-dom" "socket.io-client" "@reduxjs/toolkit" "react-redux" "vite" "@tanstack/react-table" "@tanstack/react-query" "axios" "@auth0/auth0-react"; do
   if [ ! -d "node_modules/$dep" ]; then
     MISSING_DEPS="$MISSING_DEPS $dep"
   fi

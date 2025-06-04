@@ -62,40 +62,44 @@ export const initSocketConnection = (authToken?: string) => {
     // dispatch(updateBotStatus({ connectionError: error.message }));
   });
 
-  // Register listeners for backend events - THESE ARE EXAMPLES, ADJUST TO YOUR ACTUAL EVENTS AND SLICES
-  // Make sure your Redux slices and actions are correctly defined and imported.
+  // Register listeners for backend events
+  socket.on('bot_status_update', (data: any) => {
+    console.log('🤖 Bot Status Update:', data);
+    // TODO: dispatch(updateBotStatus(data)); 
+  });
 
-  // socket.on('bot_status_update', (data: any) => {
-  //   console.log('Received bot_status_update:', data);
-  //   // dispatch(updateBotStatus(data)); 
-  // });
+  socket.on('portfolio_update', (data: any) => {
+    console.log('💰 Portfolio Update:', data);
+    // Invalider le cache React Query pour forcer le reload
+    // TODO: queryClient.invalidateQueries(['portfolio']);
+  });
 
-  // socket.on('portfolio_update', (data: any) => {
-  //   console.log('Received portfolio_update:', data);
-  //   // dispatch(updatePortfolio(data));
-  // });
+  socket.on('new_trade_executed', (data: any) => {
+    console.log('💱 New Trade Executed:', data);
+    // Invalider le cache des trades pour afficher le nouveau
+    // TODO: queryClient.invalidateQueries(['trades']);
+  });
 
-  // socket.on('new_log_entry', (data: any) => {
-  //   console.log('Received new_log_entry:', data);
-  //   // dispatch(addLogEntry(data));
-  // });
+  socket.on('ai_decision_update', (data: any) => {
+    console.log('🧠 AI Decision Update:', data);
+    // TODO: dispatch(newAiDecision(data));
+  });
+
+  socket.on('market_data_update', (data: any) => {
+    console.log('📈 Market Data Update:', data);
+    // TODO: dispatch(updateMarketData(data)); 
+  });
   
-  // socket.on('ai_decision_update', (data: any) => {
-  //   console.log('Received ai_decision_update:', data);
-  //   // dispatch(newAiDecision(data));
-  // });
+  socket.on('system_alert', (data: { message: string; type: 'error' | 'success' | 'warning'; timestamp: string }) => {
+    console.log('🚨 System Alert:', data);
+    // TODO: Implémenter toast notifications
+    // toast[data.type](data.message);
+  });
 
-  // socket.on('market_update', (data: any) => {
-  //   console.log('Received market_update:', data);
-  //   // dispatch(updateMarketData(data)); 
-  // });
-  
-  // Example: a custom event from backend to show an alert
-  // socket.on('show_alert', (data: { message: string; type: 'error' | 'success' | 'warning' }) => {
-  //   console.log('Received show_alert:', data);
-  //   // Here you might dispatch an action to a notification slice or use a toast library directly
-  //   // e.g., toast[data.type](data.message);
-  // });
+  socket.on('emergency_stop', (data: any) => {
+    console.log('🆘 Emergency Stop Triggered:', data);
+    // TODO: Rediriger vers une page d'alerte ou afficher modal
+  });
 
   return socket;
 };

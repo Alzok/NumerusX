@@ -10,6 +10,13 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     wget \
     pkg-config \
+    gcc \
+    g++ \
+    gfortran \
+    libopenblas-dev \
+    liblapack-dev \
+    libblas-dev \
+    libffi-dev \
     # Add any other system-level dependencies your Python packages might need
     && rm -rf /var/lib/apt/lists/*
 
@@ -29,8 +36,11 @@ WORKDIR /code
 # Copy requirements.txt from the project root
 COPY requirements.txt /code/
 
+# Install build dependencies first with specific compatible versions
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # Install numpy and cython first, as they are often build dependencies for other packages
-RUN pip install --no-cache-dir numpy==1.24.3 cython
+RUN pip install --no-cache-dir "numpy>=1.24.0,<2.0.0" "cython>=0.29.0"
 
 # Install Python dependencies from requirements.txt
 # TA-Lib should now find the system library installed above

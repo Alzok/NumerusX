@@ -11,16 +11,17 @@ import SettingsPage from '@/pages/SettingsPage';
 import LoginPage from '@/pages/LoginPage'; // Assuming you have a LoginPage
 import { AuthenticationGuard } from '@/components/auth/AuthenticationGuard'; // Import the guard
 import { initSocketConnection, disconnectSocket } from '@/lib/socketClient'; // Import socket functions
+import { useApiClient } from '@/hooks/useApiClient'; // Import API client hook
 import './App.css';
 
 // Layout component for authenticated routes
-const AppLayout: React.FC = () => (
+const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="flex flex-col min-h-screen bg-background text-foreground">
     <Header />
     <div className="flex flex-1 pt-14"> {/* Add padding-top to account for sticky header height */}
       <Sidebar className="w-64 hidden md:block fixed top-14 left-0 h-[calc(100vh-56px)]" /> {/* Adjust width, top, and height */}
       <main className="flex-1 p-4 md:p-6 lg:p-8 md:ml-64"> {/* Add margin-left to account for sidebar width */}
-        <Outlet /> {/* Nested routes will render here */}
+        {children} {/* Render children instead of Outlet */}
       </main>
     </div>
     {/* Footer can be optional within the authenticated layout or outside */}
@@ -33,6 +34,9 @@ const AppLayout: React.FC = () => (
 
 const App: React.FC = () => {
   const { isLoading, error, isAuthenticated } = useAuth0();
+  
+  // Configure l'API client avec Auth0
+  useApiClient();
 
   useEffect(() => {
     // Cleanup socket connection when the main App unmounts or user is no longer authenticated
