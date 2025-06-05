@@ -1,4 +1,5 @@
 import asyncio # Added for async sleep and operations
+import logging
 from app.market.market_data import MarketDataProvider # Changed import
 from app.trading.trading_engine import TradingEngine # Assuming this is the correct name now
 from app.security.security import SecurityChecker # Assuming this is the correct name now
@@ -7,6 +8,7 @@ from app.strategy_selector import StrategySelector # Import StrategySelector
 from app.logger import DexLogger # Assuming a logger class
 from app.database import EnhancedDatabase
 import time
+import logging
 from typing import List, Dict, Optional, Any, Tuple # Added Tuple
 from app.config import Config
 from app.prediction_engine import PricePredictor, PredictionResult # Import necessary classes
@@ -23,21 +25,15 @@ import uuid # Added for request_id
 
 from app.models.ai_inputs import (
     AggregatedInputs,
-    TargetPairInfo,
     MarketDataInput,
-    OHLCV,
-    KeySupportResistance,
     SignalSourceInput,
     PredictionEngineInput,
-    PricePrediction,
-    SentimentAnalysis,
     RiskManagerInput,
     PortfolioManagerInput,
-    PortfolioPositionInput,
-    SecurityCheckerInput,
-    TokenSecurityRisk
+    SecurityCheckerInput
 )
 from app.socket_manager import get_socket_manager
+import logging
 
 logger = logging.getLogger(__name__)
 

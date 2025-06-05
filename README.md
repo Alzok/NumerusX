@@ -11,6 +11,10 @@ NumerusX is an advanced AI-powered cryptocurrency trading bot specifically desig
 - **💬 Real-time Communication**: WebSocket integration for live updates
 - **🎨 Modern UI**: Built with shadcn/ui components for professional appearance
 - **📱 Responsive Design**: Mobile-first approach with desktop optimization
+- **🚀 Production Ready**: Complete Docker setup with Redis caching and monitoring
+- **📈 Advanced Analytics**: Comprehensive trading statistics and performance metrics
+- **🛡️ Risk Management**: Built-in stop-loss, take-profit, and portfolio optimization
+- **🔧 Development Tools**: Complete dev-tools script with 20+ commands for easy development
 
 ## 🏗️ Technical Architecture
 
@@ -30,6 +34,15 @@ NumerusX is an advanced AI-powered cryptocurrency trading bot specifically desig
 - **Auth0**: Authentication provider
 - **Chart.js**: Data visualization
 - **Tailwind CSS**: Utility-first styling
+- **Vite**: Fast development and build tool
+- **Socket.io Client**: Real-time WebSocket communication
+
+### Infrastructure & DevOps
+- **Docker Compose**: Multi-service orchestration
+- **Redis**: High-performance caching layer
+- **Development Scripts**: Automated setup and management tools
+- **Environment Management**: Complete .env configuration
+- **API Structure**: RESTful API with 32 endpoints across 7 modules
 
 ## 🎨 UI Components & Design System
 
@@ -190,6 +203,19 @@ npm run test
 5. Submit a pull request
 
 ## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🆘 Support
+
+For support and questions:
+- Create an issue in the GitHub repository
+- Check the documentation in the `/docs` folder
+- Review the API documentation at `/docs` endpoint
+
+---
+
+**⚠️ Disclaimer**: This trading bot is for educational and experimental purposes. Always test thoroughly before using with real funds. Cryptocurrency trading involves significant risk.
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 

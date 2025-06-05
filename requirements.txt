@@ -1,9 +1,8 @@
-nicegui>=1.4
 solana==0.29.1
-solders==0.15.1
+solders>=0.14.0,<0.15.0
 requests>=2.31.0
 python-dotenv>=1.0.0
-TA-Lib==0.4.24
+# TA-Lib==0.4.24  # Temporairement commenté - problème de build Docker
 pandas>=2.1.0
 numpy>=1.24.0,<2.0.0
 tenacity>=8.2.3
@@ -20,7 +19,7 @@ python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 PyJWT>=2.8.0
 base58==2.1.1
-jupiter-python-sdk==0.0.2.0
+# jupiter-python-sdk==0.0.2.0  # Temporairement supprimé - conflit anchorpy/solana
 google-generativeai>=0.5.4
 gensim>=4.3.0
 shap>=0.41.0
@@ -36,7 +35,5 @@ async-timeout>=4.0.3
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-mock>=3.11.0
-httpx>=0.24.0
-
-# Rate limiting
-fastapi-limiter>=0.1.5
+httpx>=0.23.0,<0.24.0
+psutil==5.9.6

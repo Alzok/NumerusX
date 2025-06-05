@@ -45,6 +45,10 @@ class InsufficientDataError(NumerusXBaseError):
     """Raised when not enough data is available for an operation."""
     pass
 
+class DataCollectionError(NumerusXBaseError):
+    """Raised when there's an error collecting data from various sources."""
+    pass
+
 class TradingError(NumerusXBaseError):
     """Base class for trading related errors."""
     pass
@@ -90,4 +94,4 @@ class TransactionConfirmationError(SolanaTransactionError):
 
 class TransactionExpiredError(SolanaTransactionError):
     """Raised when a transaction expires due to blockhash or last valid block height issues."""
-    pass 
+    pass

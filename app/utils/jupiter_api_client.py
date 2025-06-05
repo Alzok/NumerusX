@@ -5,20 +5,35 @@ from typing import Any, Dict, List, Optional, Callable
 import solders
 from solders.keypair import Keypair
 from solders.pubkey import Pubkey
-from solders.rpc.errors import TransactionExpiredBlockheightExceededError
+# # from solders.rpc.errors import TransactionExpiredBlockheightExceededError  # Import not available in current solders version  # This import might not exist
 from solders.transaction import VersionedTransaction
-from solders.rpc.config import TxOpts
+# from solders.rpc.config import TxOpts  # Temporarily commented out due to import conflict
 
 from solana.rpc.async_api import AsyncClient
-# Ensure this import path is correct based on where Config is defined.
-# Assuming it's in app.config as per the todo file.
-from app.config import Config 
+# Import Config using alias to avoid naming conflicts with solders.rpc.config
+from app.config import Config as AppConfig
 
 # Assuming jupiter_python_sdk is installed and its structure is as expected.
 # These imports might need adjustment based on the actual SDK structure.
-from jupiter_python_sdk.jupiter import Jupiter
+# from jupiter_python_sdk.jupiter import Jupiter  # SDK not available - using stub below
 # from jupiter_python_sdk.trigger import Trigger, OrderInfo # Example if these are separate
 # from jupiter_python_sdk.dca import ... # Example for DCA
+
+# Replace with temporary stub:
+# from jupiter_python_sdk.jupiter import Jupiter  # Temporarily commented - SDK not available
+# from jupiter_python_sdk.trigger import Trigger, OrderInfo # Example if these are separate  
+# from jupiter_python_sdk.dca import ... # Example for DCA
+
+# Temporary Jupiter stub class
+class Jupiter:
+    def __init__(self, *args, **kwargs):
+        logger.warning("Using Jupiter stub - real SDK not available")
+    
+    async def quote(self, *args, **kwargs):
+        raise JupiterAPIError("Jupiter SDK not available - stub implementation")
+    
+    async def swap(self, *args, **kwargs):
+        raise JupiterAPIError("Jupiter SDK not available - stub implementation")
 
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type, AsyncRetrying, RetryError
 
@@ -41,7 +56,7 @@ class JupiterApiClient:
     Includes error handling and retry mechanisms.
     """
 
-    def __init__(self, private_key_bs58: str, rpc_url: str, config: Config):
+    def __init__(self, private_key_bs58: str, rpc_url: str, config: AppConfig):
         """
         Initializes the JupiterApiClient.
 
@@ -50,6 +65,9 @@ class JupiterApiClient:
             rpc_url: The Solana RPC URL.
             config: The application's Config object.
         """
+        # Temporarily use stub implementation since jupiter_python_sdk not installed
+        logger.warning("JupiterApiClient using stub implementation - jupiter_python_sdk not installed")
+        
         self.config = config
         try:
             self.keypair = Keypair.from_base58_string(private_key_bs58)
@@ -60,6 +78,11 @@ class JupiterApiClient:
             raise ValueError(f"Invalid private_key_bs58: {e}") from e
 
         self.async_client = AsyncClient(rpc_url)
+        
+        # Temporary stub since jupiter_python_sdk is not installed
+        self.jupiter = None
+        logger.warning("Jupiter SDK not available - using stub implementation")
+        return  # Exit early to avoid Jupiter initialization
         
         # Construct base URLs for Jupiter SDK modules if it expects them this way.
         # The SDK documentation should clarify how base URLs for different API groups are handled.
@@ -80,29 +103,33 @@ class JupiterApiClient:
             # but typically an explicit setting to USE_PRO_API would be better.
             # jup_hostname = self.config.JUPITER_PRO_API_HOSTNAME # Uncomment if Pro API is to be used
 
-        try:
-            self.jupiter = Jupiter(
-                async_client=self.async_client,
-                keypair=self.keypair, # The SDK might use this for signing some requests or for specific API endpoints
-                # The SDK might abstract away the full URLs if it knows the paths for quote, swap, etc.
-                # Or it might require the full base URLs for each service.
-                # Referencing the SDK's expected parameters:
-                quote_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_SWAP_API_PATH.rstrip('/')}/quote",
-                swap_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_SWAP_API_PATH.rstrip('/')}/swap",
-                price_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_PRICE_API_PATH.rstrip('/')}", # Note: Path is /price, not /price/v2/price
-                token_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_TOKEN_API_PATH.rstrip('/')}",
-                trigger_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_TRIGGER_API_PATH.rstrip('/')}",
-                recurring_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_RECURRING_API_PATH.rstrip('/')}",
-                # The SDK might also take an api_key parameter if using the pro version
-                api_key=self.config.JUPITER_API_KEY if jup_hostname == self.config.JUPITER_PRO_API_HOSTNAME else None
-            )
-            # If DCA or Trigger modules are separate in the SDK and need their own init:
-            # self.jupiter_trigger = JupiterTrigger(...)
-            # self.jupiter_dca = JupiterDCA(...)
-            logger.info("Jupiter SDK client initialized.")
-        except Exception as e:
-            logger.error(f"Failed to initialize Jupiter SDK: {e}", exc_info=True)
-            raise RuntimeError(f"Jupiter SDK initialization failed: {e}") from e
+        # try:
+        #     self.jupiter = Jupiter(
+        #         async_client=self.async_client,
+        #         keypair=self.keypair, # The SDK might use this for signing some requests or for specific API endpoints
+        #         # The SDK might abstract away the full URLs if it knows the paths for quote, swap, etc.
+        #         # Or it might require the full base URLs for each service.
+        #         # Referencing the SDK's expected parameters:
+        #         quote_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_SWAP_API_PATH.rstrip('/')}/quote",
+        #         swap_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_SWAP_API_PATH.rstrip('/')}/swap",
+        #         price_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_PRICE_API_PATH.rstrip('/')}", # Note: Path is /price, not /price/v2/price
+        #         token_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_TOKEN_API_PATH.rstrip('/')}",
+        #         trigger_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_TRIGGER_API_PATH.rstrip('/')}",
+        #         recurring_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_RECURRING_API_PATH.rstrip('/')}",
+        #         # The SDK might also take an api_key parameter if using the pro version
+        #         api_key=self.config.JUPITER_API_KEY if jup_hostname == self.config.JUPITER_PRO_API_HOSTNAME else None
+        #     )
+        #     # If DCA or Trigger modules are separate in the SDK and need their own init:
+        #     # self.jupiter_trigger = JupiterTrigger(...)
+        #     # self.jupiter_dca = JupiterDCA(...)
+        #     logger.info("Jupiter SDK client initialized.")
+        # except Exception as e:
+        #     logger.error(f"Failed to initialize Jupiter SDK: {e}", exc_info=True)
+        #     raise RuntimeError(f"Jupiter SDK initialization failed: {e}") from e
+        
+        # Temporary stub since jupiter_python_sdk is not installed
+        self.jupiter = None
+        logger.warning("Jupiter SDK not available - using stub implementation")
 
         self.http_headers = {'Accept': 'application/json'} # Default headers, SDK might handle this.
 
@@ -116,8 +143,11 @@ class JupiterApiClient:
         # This is a generic list, refine with actual SDK exceptions
         retryable_exceptions = (
             asyncio.TimeoutError, # General timeout
-            solders.rpc.errors.TransactionExpiredBlockheightExceededError, # Specific to Solana transactions
-            # Add other specific exceptions from jupiter-python-sdk if they are transient
+            # Comment out this line:
+            # solders.rpc.errors.TransactionExpiredBlockheightExceededError, # Specific to Solana transactions
+            # Replace with:
+            # Exception,  # Generic exception handling since specific one not available
+            # Add other specific exceptions from the SDK or Solana client that are transient
             # e.g., ConnectionError, HTTP 502/503/504 if the SDK surfaces them directly
         )
 
@@ -257,13 +287,13 @@ class JupiterApiClient:
             
             for attempt_num in range(max_blockhash_retries):
                 try:
-                    opts = TxOpts(
-                        skip_preflight=True, # As recommended by Jupiter for best execution
-                        preflight_commitment="confirmed", 
-                        last_valid_block_height=last_valid_block_height
-                    )
-                    # Send the transaction
-                    resp = await self.async_client.send_transaction(serialized_signed_tx, opts=opts)
+                    # opts = TxOpts(
+                    #     skip_preflight=True, # As recommended by Jupiter for best execution
+                    #     preflight_commitment="confirmed", 
+                    #     last_valid_block_height=last_valid_block_height
+                    # )
+                    # Send the transaction without TxOpts for now
+                    resp = await self.async_client.send_transaction(serialized_signed_tx)
                     
                     # Confirm the transaction
                     # The SDK or Solana client library should provide a robust confirmation method.
@@ -277,7 +307,7 @@ class JupiterApiClient:
                     logger.info(f"Transaction confirmed: {resp.value}")
                     return str(resp.value) # Return signature string on success
 
-                except TransactionExpiredBlockheightExceededError as e:
+                except Exception as e:  # Generic exception handling
                     logger.warning(f"Transaction {str(tx.signatures[0]) if tx.signatures else 'N/A'} expired (attempt {attempt_num + 1}/{max_blockhash_retries}): {e}. Refreshing blockhash.")
                     if attempt_num + 1 >= max_blockhash_retries:
                         # Raise custom error if max retries reached for this specific error
@@ -553,5 +583,7 @@ class JupiterApiClient:
 #     # try:
 #     #     asyncio.run(main())
 #     # except KeyboardInterrupt:
+#     #     print("Test execution cancelled.")
+#     pass 
 #     #     print("Test execution cancelled.")
 #     pass 

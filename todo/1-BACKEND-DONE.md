@@ -67,3 +67,14 @@
 ➡️ **Se concentrer sur le Frontend** (TODO 2-FRONTEND-CRITICAL)
 
 Le backend est fonctionnel et prêt pour la production. Les améliorations listées sont optionnelles et peuvent être faites après le frontend. 
+
+#### Code Quality
+- [ ] Remove TODOs et DEPRECATED code (TradeExecutor.execute_trade_signal)
+- [ ] Standardiser logging levels (trop de DEBUG/WARNING)
+- [ ] Update docstrings pour fonctions modifiées
+
+## Prochaine Étape
+
+➡️ **Se concentrer sur le Frontend** (TODO 2-FRONTEND-CRITICAL)
+
+Le backend est fonctionnel et prêt pour la production. Les améliorations listées sont optionnelles et peuvent être faites après le frontend. 

@@ -8,7 +8,7 @@ from cachetools import TTLCache
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.config import Config
-from app.utils.jupiter_api_client import JupiterApiClient
+# from app.utils.jupiter_api_client import JupiterApiClient  # Temporarily disabled - SDK not installed
 from app.utils.exceptions import (
     JupiterAPIError, DexScreenerAPIError, SolanaTransactionError, 
     TransactionExpiredError, NumerusXBaseError
@@ -139,7 +139,9 @@ class MarketDataProvider:
             logger.error(f"Unexpected error in _get_dexscreener_price call for {token_address}: {e}", exc_info=True)
             
         # If all sources failed
-        full_error_message = f"Impossible d'obtenir le prix pour {token_address}. Erreurs: {'; '.join(final_errors) if final_errors else 'Aucune source n\'a pu fournir de prix.'}"
+        default_message = "Aucune source n'a pu fournir de prix."
+        errors_str = '; '.join(final_errors) if final_errors else default_message
+        full_error_message = f"Impossible d'obtenir le prix pour {token_address}. Erreurs: {errors_str}"
         logger.error(full_error_message)
         return {'success': False, 'error': full_error_message, 'data': None}
         
@@ -236,7 +238,9 @@ class MarketDataProvider:
             final_errors.append(f"DexScreener Unexpected Error: {str(e)}")
             logger.error(f"Unexpected error in DexScreener direct call for {token_address} token info: {e}", exc_info=True)
         
-        full_error_message = f"Impossible d'obtenir les infos pour {token_address}. Erreurs: {'; '.join(final_errors) if final_errors else 'Aucune source n\'a pu fournir les infos.'}"
+        default_info_message = "Aucune source n'a pu fournir les infos."
+        errors_str = '; '.join(final_errors) if final_errors else default_info_message
+        full_error_message = f"Impossible d'obtenir les infos pour {token_address}. Erreurs: {errors_str}"
         logger.error(full_error_message)
         return {'success': False, 'error': full_error_message, 'data': None}
 
@@ -701,7 +705,7 @@ class MarketDataProvider:
             logger.warning(f"Historical price data for exchange '{exchange}' is not implemented.")
             return {'success': False, 'error': f"exchange_not_implemented: {exchange}", 'data': None}
 
-    @retry(stop=stop_after_attempt(Config.DEFAULT_API_MAX_RETRIES), wait=wait_exponential(multiplier=1, min=1, max=10), 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), 
            retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)))
     async def get_jupiter_swap_quote(
         self, 
@@ -865,6 +869,10 @@ class MarketDataProvider:
             Liste de dictionnaires avec {"timestamp": float, "liquidity_usd": float, "source": str}.
         """
         logger.warning(f"get_liquidity_history pour {token_address} est un placeholder et retourne des données vides.")
+        # Exemple de structure attendue par SecurityChecker (simplifié):
+        # return [{ "timestamp": time.time(), "liquidity_usd": 10000.0, "source": "dexscreener" }]
+        return []
+
         # Exemple de structure attendue par SecurityChecker (simplifié):
         # return [{ "timestamp": time.time(), "liquidity_usd": 10000.0, "source": "dexscreener" }]
         return []

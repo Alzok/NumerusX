@@ -21,3 +21,9 @@ EXPOSE 5173
 # Command to run the initialization script
 # The script will handle 'npm install' and 'npm run dev'
 CMD ["/app/init-frontend.sh"] 
+# Expose the Vite default port
+EXPOSE 5173
+
+# Command to run the initialization script
+# The script will handle 'npm install' and 'npm run dev'
+CMD ["/app/init-frontend.sh"] 

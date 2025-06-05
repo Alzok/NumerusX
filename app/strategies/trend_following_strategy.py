@@ -1,5 +1,9 @@
 import pandas as pd
-import talib # For ADX and MAs, if preferred over pandas_ta or manual
+try:
+    import talib # For ADX and MAs, if preferred over pandas_ta or manual
+    HAS_TALIB = True
+except ImportError:
+    HAS_TALIB = False
 # import pandas_ta as ta # Uncomment if using pandas_ta
 from app.strategy_framework import BaseStrategy
 from typing import Dict

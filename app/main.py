@@ -245,18 +245,30 @@ def configure_logging():
 
 def check_environment():
     """Vérifie les variables d'environnement requises"""
-    # This might need adjustment based on FastAPI app's direct needs vs. DexBot needs
-    # For now, let's assume these are still critical if DexBot is to be managed.
-    required_vars = ['ENCRYPTION_KEY', 'ENCRYPTED_SOLANA_PK'] 
-    # If API keys for services are used directly by FastAPI endpoints, add them here.
-    # e.g., JUPITER_API_KEY if used by some admin/manual trade endpoint.
+    # Check for the essential encryption key
+    missing = []
     
-    # Check against Config attributes
-    missing = [var for var in required_vars if not hasattr(Config, var) or not getattr(Config, var)]
+    # Check for MASTER_ENCRYPTION_KEY which is the current encryption system
+    if not hasattr(Config, 'MASTER_ENCRYPTION_KEY_ENV') or not Config.MASTER_ENCRYPTION_KEY_ENV:
+        missing.append('MASTER_ENCRYPTION_KEY')
+    
+    # Check for Solana private key (either plain or encrypted)
+    has_solana_key = (
+        (hasattr(Config, 'SOLANA_PRIVATE_KEY_BS58') and Config.SOLANA_PRIVATE_KEY_BS58) or
+        (hasattr(Config, 'ENCRYPTED_SOLANA_PRIVATE_KEY_BS58') and Config.ENCRYPTED_SOLANA_PRIVATE_KEY_BS58) or
+        (hasattr(Config, 'WALLET_PATH') and Config.WALLET_PATH and os.path.exists(Config.WALLET_PATH))
+    )
+    
+    if not has_solana_key:
+        missing.append('SOLANA_PRIVATE_KEY (any form: BS58, encrypted, or wallet file)')
     
     if missing:
         logging.critical(f"Variables d'environnement critiques manquantes ou non définies: {', '.join(missing)}")
-        # sys.exit(1) # Exit can be problematic for uvicorn reload, log critical and let app fail on use if needed
+        # In development mode, we can be more lenient
+        if Config.DEV_MODE:
+            logging.warning("Running in DEV_MODE - proceeding despite missing critical variables")
+            return
+        
         raise RuntimeError(f"Missing critical environment variables: {', '.join(missing)}")
 
 

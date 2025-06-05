@@ -41,7 +41,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         authorizationParams={{
           redirect_uri: window.location.origin + '/dashboard', // Ou une page de callback dédiée
           audience: AUTH0_AUDIENCE, // Si applicable
-          // scope: "openid profile email read:current_user update:current_user_metadata" // Exemple de scopes
+          scope: "openid profile email read:current_user update:current_user_metadata" // Exemple de scopes
         }}
         cacheLocation="localstorage" // Recommandé pour les SPAs
       >

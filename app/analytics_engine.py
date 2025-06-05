@@ -1,5 +1,10 @@
 import pandas as pd
-import talib
+try:
+    import talib
+    HAS_TALIB = True
+except ImportError:
+    HAS_TALIB = False
+    import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Union, Any
 import logging

@@ -35,7 +35,8 @@ class MeanReversionStrategy(BaseStrategy):
             return {'error': 'Close price not found or empty in market_data'}
         
         if len(market_data['close']) < self.bb_period:
-            return {'error': f'Not enough data for Bollinger Bands (need {self.bb_period}, got {len(market_data['close'])})'}
+            data_length = len(market_data['close'])
+            return {'error': f'Not enough data for Bollinger Bands (need {self.bb_period}, got {data_length})'}
 
         # Using pandas_ta if available:
         # try:

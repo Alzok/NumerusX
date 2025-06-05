@@ -12,8 +12,8 @@ from app.config import Config
 # from app.security.security import SecurityChecker
 # from app.portfolio_manager import PortfolioManager
 # from app.strategy_framework import BaseStrategy
-from app.ai_agent.gemini_client import GeminiClient # Import GeminiClient
-from app.models.ai_inputs import AggregatedInputs, OHLCV, SignalSourceInput # Import AggregatedInputs, OHLCV, SignalSourceInput
+from app.ai_agent_package.gemini_client import GeminiClient # Import GeminiClient
+from app.models.ai_inputs import AggregatedInputs, SignalSourceInput # Import AggregatedInputs, SignalSourceInput
 from pydantic import BaseModel, ValidationError, confloat, constr # Added BaseModel, ValidationError, confloat, constr
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ class AIAgent:
         logger.info(f"AIAgent final decision for TradeExecutor: {final_decision_for_executor}")
         return final_decision_for_executor
 
-    def _summarize_ohlcv(self, ohlcv_list: List[OHLCV], max_candles: int = 12) -> List[OHLCV]:
+    def _summarize_ohlcv(self, ohlcv_list: List[Dict], max_candles: int = 12) -> List[Dict]:
         """Summarizes OHLCV data to include max_candles most recent ones."""
         if len(ohlcv_list) > max_candles:
             logger.debug(f"Summarizing OHLCV data from {len(ohlcv_list)} to {max_candles} candles.")
@@ -206,9 +206,9 @@ class AIAgent:
 
         # Summarize market_data.recent_ohlcv_1h
         if summarized_inputs_dict.get('market_data') and summarized_inputs_dict['market_data'].get('recent_ohlcv_1h'):
-            original_ohlcv = [OHLCV(**o) for o in summarized_inputs_dict['market_data']['recent_ohlcv_1h']]
+            original_ohlcv = summarized_inputs_dict['market_data']['recent_ohlcv_1h']
             summarized_ohlcv = self._summarize_ohlcv(original_ohlcv, max_candles=self.config.GEMINI_PROMPT_MAX_OHLCV_CANDLES)
-            summarized_inputs_dict['market_data']['recent_ohlcv_1h'] = [o.model_dump() for o in summarized_ohlcv]
+            summarized_inputs_dict['market_data']['recent_ohlcv_1h'] = summarized_ohlcv
 
         # Summarize signal_sources
         if summarized_inputs_dict.get('signal_sources'):
@@ -292,7 +292,7 @@ async def main_test_agent():
     from datetime import datetime
     from app.models.ai_inputs import (
         TargetPairInfo, MarketDataInput, SignalSourceInput, PredictionEngineInput,
-        RiskManagerInput, PortfolioManagerInput, SecurityCheckerInput, OHLCV, KeySupportResistance,
+        RiskManagerInput, PortfolioManagerInput, SecurityCheckerInput, KeySupportResistance,
         PricePrediction, SentimentAnalysis
     )
     
@@ -302,7 +302,7 @@ async def main_test_agent():
         target_pair=TargetPairInfo(symbol="SOL/USDC", input_mint="So11111111111111111111111111111111111111112", output_mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
         market_data=MarketDataInput(
             current_price=170.50,
-            recent_ohlcv_1h=[OHLCV(t=int(time.time()) - 3600, o=169.0, h=171.0, l=168.5, c=170.5, v=1000)],
+            recent_ohlcv_1h=[{"t": int(time.time()) - 3600, "o": 169.0, "h": 171.0, "l": 168.5, "c": 170.5, "v": 1000}],
             liquidity_depth_usd=10000000,
             recent_trend_1h="UPWARD",
             key_support_resistance=KeySupportResistance(support_1=165.0, resistance_1=175.0),

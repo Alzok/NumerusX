@@ -128,3 +128,7 @@ export const getBotStatus = () => emitSocketEvent('get_bot_status');
 
 // Consider calling initSocketConnection in your main App component or after successful login.
 // The authToken should be retrieved from your auth provider (e.g., Auth0). 
+export const getBotStatus = () => emitSocketEvent('get_bot_status');
+
+// Consider calling initSocketConnection in your main App component or after successful login.
+// The authToken should be retrieved from your auth provider (e.g., Auth0). 

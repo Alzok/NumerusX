@@ -42,19 +42,23 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 # Install numpy and cython first, as they are often build dependencies for other packages
 RUN pip install --no-cache-dir "numpy>=1.24.0,<2.0.0" "cython>=0.29.0"
 
-# Install Python dependencies from requirements.txt
-# TA-Lib should now find the system library installed above
-# scikit-learn will build using the pre-installed numpy and cython
+# Install CPU-only PyTorch first to avoid CUDA downloads that cause timeouts
+RUN pip install --no-cache-dir torch==2.1.2+cpu --index-url https://download.pytorch.org/whl/cpu
+
+# Install Python dependencies from requirements.txt (torch will be ignored since already installed)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the backend application code
 COPY app /code/app
 
 # Set the working directory to where your main application file is
-WORKDIR /code/app
+WORKDIR /code
+
+# Add /code to Python path so imports work correctly
+ENV PYTHONPATH=/code
 
 # Expose the port the app runs on
 EXPOSE 8000
 
 # Command to run the FastAPI application using Uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 

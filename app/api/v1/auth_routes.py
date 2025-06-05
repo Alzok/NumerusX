@@ -39,6 +39,20 @@ class TokenData(BaseModel):
     username: Optional[str] = None
 
 
+class User(BaseModel):
+    """User model for authenticated users."""
+    username: str
+    role: str = "admin"
+
+
+def require_auth():
+    """Dependency factory for requiring authentication."""
+    def get_current_user(token_data: TokenData = Depends(verify_token)) -> User:
+        """Get current authenticated user."""
+        return User(username=token_data.username, role="admin")
+    return get_current_user
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     """Create a JWT access token."""
     to_encode = data.copy()

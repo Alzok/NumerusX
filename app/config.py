@@ -1,11 +1,12 @@
 # config.py
 import os
+from typing import Optional
 from dotenv import load_dotenv
 import json
 from cryptography.fernet import Fernet, InvalidToken
 import base64
 import logging # Added for EncryptionUtil logging
-from app.analytics_engine import AdvancedTradingStrategy # Import for default strategy name
+# Import moved to resolve circular dependency - imported in get_default_strategy_name()
 
 # Charger les variables d'environnement depuis .env
 load_dotenv()
@@ -320,7 +321,7 @@ class Config:
     GEMINI_PROMPT_MAX_SIGNAL_SOURCES = int(os.getenv("GEMINI_PROMPT_MAX_SIGNAL_SOURCES", "3")) # Max signal sources to include (prioritized)
 
     # Configuration des Stratégies
-    DEFAULT_STRATEGY_NAME = os.getenv("DEFAULT_STRATEGY_NAME", AdvancedTradingStrategy().get_name()) # Default to AdvancedTradingStrategy
+    DEFAULT_STRATEGY_NAME = os.getenv("DEFAULT_STRATEGY_NAME", "AdvancedTradingStrategy") # Default to AdvancedTradingStrategy
 
     # Chemins et Logs
     LOG_DIR = os.getenv("LOG_DIR", "logs")
@@ -444,4 +445,5 @@ Config.get_db_path()
 # ou explicitement si on veut juste le dir. get_log_file_path() est plus complet pour le handler.
 # Assurons nous que le log dir est créé au cas où get_log_file_path n'est pas appelé immédiatement.
 if not os.path.exists(Config.LOG_DIR):
+    Config.get_log_dir()
     Config.get_log_dir()

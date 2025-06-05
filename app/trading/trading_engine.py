@@ -6,8 +6,8 @@ from solana.rpc.async_api import AsyncClient
 from solana.transaction import Transaction
 from solders.keypair import Keypair
 from solders.signature import Signature
-from solana.rpc.commitment import Confirmed, ConfirmationStatus
-from solders.fee_calculator import FeeCalculator
+from solana.rpc.commitment import Confirmed
+
 import base58
 import os
 import json

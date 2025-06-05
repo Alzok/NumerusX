@@ -3,7 +3,7 @@ Trade management routes for NumerusX API v1.
 Handles trade history, manual trades, and trade analytics.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -257,7 +257,7 @@ async def cancel_trade(
 
 @router.get("/statistics/{period}", response_model=TradeStatistics)
 async def get_trade_statistics(
-    period: str = Query(..., pattern="^(1h|24h|7d|30d|all)$"),
+    period: str = Path(..., pattern="^(1h|24h|7d|30d|all)$"),
     current_user: User = Depends(require_auth())
 ):
     """
