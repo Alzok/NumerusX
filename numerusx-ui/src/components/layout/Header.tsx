@@ -1,5 +1,5 @@
-import React from 'react';
-import { Moon, Sun, Bot } from 'lucide-react'; // Example icons
+import * as React from 'react';
+import { Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button'; // Assuming ShadCN/UI button is installed and aliased
 // import { useTheme } from 'next-themes'; // Will be used later for theme toggle
 

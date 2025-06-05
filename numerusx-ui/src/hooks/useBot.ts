@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
-import { toast } from 'sonner';
 
 /**
  * Hook pour récupérer le statut du bot
@@ -70,74 +69,23 @@ export const useEmergencyStop = () => {
     },
   });
 }; 
-import { apiClient } from '@/lib/apiClient';
-import { toast } from 'sonner';
+// Hook composé qui regroupe tous les hooks du bot
+export const useBot = () => {
+  const botStatus = useBotStatus();
+  const startBot = useStartBot();
+  const stopBot = useStopBot();
+  const emergencyStop = useEmergencyStop();
 
-/**
- * Hook pour récupérer le statut du bot
- */
-export const useBotStatus = () => {
-  return useQuery({
-    queryKey: ['botStatus'],
-    queryFn: async () => {
-      const response = await apiClient.get('/api/v1/bot/status');
-      return response.data;
+  return {
+    data: botStatus.data,
+    isLoading: botStatus.isLoading,
+    startBot: startBot.mutate,
+    stopBot: stopBot.mutate,
+    restartBot: () => {
+      stopBot.mutate();
+      setTimeout(() => startBot.mutate(), 1000);
     },
-    refetchInterval: 5000,
-  });
+    emergencyStop: emergencyStop.mutate,
+    updateConfig: () => {}, // Placeholder
+  };
 };
-
-/**
- * Hook pour démarrer le bot
- */
-export const useStartBot = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => apiClient.startBot(),
-    onSuccess: () => {
-      // Invalider le cache du statut pour récupérer les nouvelles données
-      queryClient.invalidateQueries({ queryKey: ['bot', 'status'] });
-    },
-    onError: (error) => {
-      console.error('Failed to start bot:', error);
-    },
-  });
-};
-
-/**
- * Hook pour arrêter le bot
- */
-export const useStopBot = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => apiClient.stopBot(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['bot', 'status'] });
-    },
-    onError: (error) => {
-      console.error('Failed to stop bot:', error);
-    },
-  });
-};
-
-/**
- * Hook pour l'arrêt d'urgence
- */
-export const useEmergencyStop = () => {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: () => apiClient.emergencyStop(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['bot', 'status'] });
-      // Également invalider portfolio et trades
-      queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-      queryClient.invalidateQueries({ queryKey: ['trades'] });
-    },
-    onError: (error) => {
-      console.error('Failed to emergency stop:', error);
-    },
-  });
-}; 

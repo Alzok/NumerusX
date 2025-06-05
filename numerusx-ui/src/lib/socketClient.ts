@@ -1,5 +1,4 @@
 import { io, Socket } from 'socket.io-client';
-import { store, AppDispatch } from '@/app/store'; // Assuming store and AppDispatch are exported
 
 // Import Redux slice actions - adjust paths and action names as per your slices
 // Example, replace with your actual slice actions:
@@ -41,7 +40,7 @@ export const initSocketConnection = (authToken?: string) => {
   }
 
   socket = io(VITE_APP_SOCKET_URL, connectionOptions);
-  const dispatch: AppDispatch = store.dispatch;
+  
 
   socket.on('connect', () => {
     console.log('Socket.IO connected successfully. Socket ID:', socket?.id);
@@ -124,10 +123,6 @@ export const emitSocketEvent = (eventName: string, data?: any) => {
 // Specific event emitters (examples)
 export const startBot = () => emitSocketEvent('start_bot');
 export const stopBot = () => emitSocketEvent('stop_bot');
-export const getBotStatus = () => emitSocketEvent('get_bot_status');
-
-// Consider calling initSocketConnection in your main App component or after successful login.
-// The authToken should be retrieved from your auth provider (e.g., Auth0). 
 export const getBotStatus = () => emitSocketEvent('get_bot_status');
 
 // Consider calling initSocketConnection in your main App component or after successful login.

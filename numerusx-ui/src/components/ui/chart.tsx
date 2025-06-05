@@ -1,5 +1,17 @@
 import * as React from "react"
 import * as RechartsPrimitive from "recharts"
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip as ChartTooltipJS,
+  Legend as ChartLegendJS,
+  ArcElement,
+} from 'chart.js';
+import { Line, Doughnut } from 'react-chartjs-2';
 
 import { cn } from "@/lib/utils"
 
@@ -348,9 +360,7 @@ function getPayloadConfigFromPayload(
     ] as string
   }
 
-  return configLabelKey in config
-    ? config[configLabelKey]
-    : config[key as keyof typeof config]
+  return config[configLabelKey as keyof typeof config]
 }
 
 export {
@@ -361,3 +371,38 @@ export {
   ChartLegendContent,
   ChartStyle,
 }
+
+// Additional Chart component for Chart.js integration
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  ChartTooltipJS,
+  ChartLegendJS,
+  ArcElement
+);
+
+interface ChartProps {
+  type: 'line' | 'doughnut';
+  data: any;
+  options?: any;
+  className?: string;
+  height?: number;
+  width?: number;
+}
+
+export const Chart: React.FC<ChartProps> = ({ type, data, options, className, height, width }) => {
+  if (type === 'line') {
+    return <Line data={data} options={options} className={className} height={height} width={width} />;
+  }
+  
+  if (type === 'doughnut') {
+    return <Doughnut data={data} options={options} className={className} height={height} width={width} />;
+  }
+  
+  return null;
+};
+
+export default Chart;
