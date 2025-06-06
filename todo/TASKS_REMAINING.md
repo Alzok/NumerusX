@@ -207,16 +207,6 @@ AUTH_PROVIDER_ISSUER=https://votre-domain.auth0.com/
 
 ## 🔧 BASSE PRIORITÉ - Polissage (2-3 semaines)
 
-### B1. CI/CD Pipeline
-**Durée**: 3-5 jours
-**Description**: Automatisation déploiement et qualité
-
-**Fonctionnalités**:
-- [ ] GitHub Actions: tests automatiques sur PR/push
-- [ ] Docker images auto-build et push registry
-- [ ] Déploiement staging/production automatisé
-- [ ] Tests sécurité automatiques (SAST/DAST)
-- [ ] Monitoring déploiements avec rollback auto
 
 ### B2. Documentation Utilisateur
 **Durée**: 2-3 jours
@@ -224,7 +214,6 @@ AUTH_PROVIDER_ISSUER=https://votre-domain.auth0.com/
 
 **Fonctionnalités**:
 - [ ] Guide utilisateur avec captures d'écran
-- [ ] Tutoriel vidéo configuration et utilisation
 - [ ] FAQ et troubleshooting problèmes communs
 - [ ] Documentation API pour développeurs externes
 - [ ] Changelog automatique basé sur commits
