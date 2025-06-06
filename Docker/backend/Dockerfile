@@ -51,6 +51,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the backend application code
 COPY app /code/app
 
+# Copy .env.example and entrypoint script
+COPY .env.example /code/
+COPY Docker/backend/entrypoint.sh /code/
+
+# Make entrypoint script executable
+RUN chmod +x /code/entrypoint.sh
+
 # Set the working directory to where your main application file is
 WORKDIR /code
 
@@ -59,6 +66,9 @@ ENV PYTHONPATH=/code
 
 # Expose the port the app runs on
 EXPOSE 8000
+
+# Use entrypoint script
+ENTRYPOINT ["/code/entrypoint.sh"]
 
 # Command to run the FastAPI application using Uvicorn
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 

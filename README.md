@@ -62,76 +62,214 @@ NumerusX is an advanced AI-powered cryptocurrency trading bot specifically desig
 4. **Portfolio**: Asset management and position tracking
 5. **Settings**: User preferences and bot configuration
 
-## 🚀 Quick Start
+## 🚀 Lancement Ultra-Simplifié 
+
+Ce projet est entièrement conteneurisé et **100% automatisé**. La seule dépendance requise sur votre machine est **Docker**.
 
 ### Prerequisites
-- Python 3.8+
-- Node.js 18+
-- npm or yarn
-- Auth0 account (for authentication)
+- Docker 20.10+ avec Docker Compose
+- Clés API (optionnelles au début) - voir section Configuration ci-dessous
 
-### Backend Setup
+### Lancement en UNE commande
+
+1. **Cloner et lancer :**
+   ```bash
+   git clone https://github.com/your-repo/numerusx.git
+   cd numerusx
+   ./start.sh
+   ```
+
+C'est tout ! 🎉
+
+### Que fait le script `./start.sh` ?
+
+1. ✅ **Vérifie** que Docker est installé
+2. ✅ **Crée automatiquement** les fichiers `.env` s'ils n'existent pas
+3. ✅ **Vous guide** pour la configuration (ou permet de continuer avec les valeurs par défaut)
+4. ✅ **Lance tous les services** Docker automatiquement
+5. ✅ **Affiche les URLs** d'accès
+
+### Méthode alternative (Docker Compose)
+
+Si vous préférez utiliser Docker Compose directement :
+
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your configuration
-
-# Run the backend
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Frontend Setup
-```bash
-cd numerusx-ui
-
-# Install dependencies
-npm install
-
-# Set up environment variables
-cp .env.example .env
-# Edit .env with your Auth0 configuration
-
-# Run the frontend
-npm run dev
-```
-
-### Docker Setup
-```bash
-# Build and run both services
 docker-compose up --build
 ```
 
-## 🔧 Configuration
+### Accès aux services
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+- **Redis**: localhost:6379
 
-### Environment Variables
-
-#### Backend (.env)
+### Arrêt du système
 ```bash
-# AI Configuration
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-2.5-flash
-
-# Jupiter DEX
-JUPITER_API_URL=https://quote-api.jup.ag/v6
-
-# Authentication
-AUTH0_DOMAIN=your_auth0_domain
-AUTH0_API_AUDIENCE=your_api_identifier
-
-# Database
-DATABASE_URL=sqlite:///./numerusx.db
+# Méthode 1: Ctrl+C dans le terminal où ./start.sh tourne
+# Méthode 2: Dans un autre terminal
+docker-compose down
 ```
 
-#### Frontend (numerusx-ui/.env)
-```bash
-VITE_AUTH0_DOMAIN=your_auth0_domain
-VITE_AUTH0_CLIENT_ID=your_client_id
-VITE_AUTH0_AUDIENCE=your_api_identifier
-VITE_API_BASE_URL=http://localhost:8000
-```
+## 🔧 Configuration des Variables d'Environnement
+
+### Variables Backend (fichier `.env` à la racine)
+
+#### 🔑 APIs Externes (OBLIGATOIRES)
+
+- `GOOGLE_API_KEY`
+  - **Description :** Clé API Google pour accéder au modèle Gemini 2.5 Flash AI
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Allez sur [Google AI Studio](https://aistudio.google.com/app/apikey), connectez-vous et créez une nouvelle clé API
+
+- `JUPITER_API_KEY`
+  - **Description :** Clé API pour Jupiter Aggregator (DEX Solana)
+  - **Obligatoire :** Optionnel pour les fonctionnalités de base
+  - **Où la trouver :** Inscrivez-vous sur [Jupiter](https://jup.ag) et demandez une clé API
+
+- `JUPITER_PRO_API_KEY`
+  - **Description :** Clé API Pro pour Jupiter avec plus de fonctionnalités
+  - **Obligatoire :** Optionnel
+  - **Où la trouver :** Version premium de Jupiter API
+
+- `DEXSCREENER_API_KEY`
+  - **Description :** Clé API pour DexScreener (données de marché)
+  - **Obligatoire :** Optionnel
+  - **Où la trouver :** Contactez [DexScreener](https://dexscreener.com) pour une clé API
+
+- `SOLANA_PRIVATE_KEY_BS58`
+  - **Description :** Clé privée Solana en format Base58 pour les transactions
+  - **Obligatoire :** Oui pour le trading réel
+  - **Où la trouver :** Générez avec `solana-keygen new` ou exportez depuis Phantom/Solflare
+
+- `SOLANA_RPC_URL`
+  - **Description :** URL du nœud RPC Solana
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Utilisez `https://api.mainnet-beta.solana.com` pour mainnet ou `https://api.devnet.solana.com` pour devnet
+
+#### 🔐 Sécurité (OBLIGATOIRES)
+
+- `JWT_SECRET_KEY`
+  - **Description :** Clé secrète pour signer les tokens JWT
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Générez une chaîne aléatoire de 32+ caractères : `openssl rand -hex 32`
+
+- `MASTER_ENCRYPTION_KEY`
+  - **Description :** Clé maître pour chiffrer les données sensibles
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Générez une chaîne aléatoire de 32+ caractères : `openssl rand -hex 32`
+
+#### 🔑 Auth0 Backend (OBLIGATOIRES pour l'authentification)
+
+- `AUTH_PROVIDER_JWKS_URI`
+  - **Description :** URI des clés publiques JWT de votre tenant Auth0
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Dashboard Auth0 → Applications → [Votre App] → Settings → Advanced → Endpoints → JSON Web Key Set : `https://YOUR-DOMAIN.auth0.com/.well-known/jwks.json`
+
+- `AUTH_PROVIDER_ISSUER`
+  - **Description :** Domaine émetteur des tokens Auth0
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Dashboard Auth0 → Applications → [Votre App] → Settings : `https://YOUR-DOMAIN.auth0.com/`
+
+- `AUTH_PROVIDER_AUDIENCE`
+  - **Description :** Identifiant unique de votre API dans Auth0
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Dashboard Auth0 → APIs → [Votre API] → Settings → Identifier
+
+#### ⚙️ Configuration Application (optionnelles avec valeurs par défaut)
+
+- `APP_NAME`
+  - **Description :** Nom de l'application
+  - **Obligatoire :** Non (défaut: "NumerusX")
+
+- `DEBUG`
+  - **Description :** Active les logs de débogage
+  - **Obligatoire :** Non (défaut: "False")
+
+- `DEV_MODE`
+  - **Description :** Mode développement (authentification optionnelle)
+  - **Obligatoire :** Non (défaut: "False")
+
+#### 💾 Base de Données (optionnelles)
+
+- `DATABASE_URL`
+  - **Description :** URL de connexion à la base de données SQLite
+  - **Obligatoire :** Non (défaut: "sqlite:///data/numerusx.db")
+
+#### 📦 Redis (optionnelles)
+
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_DB`
+  - **Description :** Configuration Redis pour le cache et rate limiting
+  - **Obligatoire :** Non (défaut: localhost:6379)
+
+### Variables Frontend (fichier `numerusx-ui/.env`)
+
+#### 🔑 Auth0 Frontend (OBLIGATOIRES)
+
+- `VITE_APP_AUTH0_DOMAIN`
+  - **Description :** Domaine de votre tenant Auth0 pour le frontend
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Dashboard Auth0 → Applications → [Votre App] → Settings → Domain : `your-domain.auth0.com`
+
+- `VITE_APP_AUTH0_CLIENT_ID`
+  - **Description :** ID client de votre application Auth0
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Dashboard Auth0 → Applications → [Votre App] → Settings → Client ID
+
+- `VITE_APP_AUTH0_AUDIENCE`
+  - **Description :** Audience API pour les tokens (même que backend)
+  - **Obligatoire :** Oui
+  - **Où la trouver :** Dashboard Auth0 → APIs → [Votre API] → Settings → Identifier
+
+#### 🌐 URLs Backend (optionnelles)
+
+- `VITE_APP_BACKEND_URL`
+  - **Description :** URL du backend API
+  - **Obligatoire :** Non (défaut: "http://localhost:8000")
+
+- `VITE_APP_SOCKET_URL`
+  - **Description :** URL WebSocket pour les mises à jour temps réel
+  - **Obligatoire :** Non (défaut: "http://localhost:8000")
+
+### 🔑 Guide Configuration Auth0
+
+1. **Créer un compte Auth0** (gratuit) : https://auth0.com
+2. **Créer une nouvelle Application** :
+   - Type : "Single Page Application"
+   - Technology : "React"
+3. **Configurer l'Application** :
+   - Allowed Callback URLs : `http://localhost:5173`
+   - Allowed Web Origins : `http://localhost:5173`
+   - Allowed Logout URLs : `http://localhost:5173`
+4. **Créer une API** :
+   - Identifier : `https://numerusx-api` (ou votre choix)
+   - Signing Algorithm : "RS256"
+5. **Copier les valeurs** dans vos fichiers `.env`
+
+## 🎯 Avantages de l'Approche Conteneurisée
+
+### ✅ Simplicité Maximale
+- **Une seule commande** : `./start.sh` et c'est parti !
+- **Aucune installation manuelle** de Python, Node.js, dépendances
+- **Configuration automatique** des fichiers d'environnement
+- **Gestion intelligente** des erreurs et warnings
+
+### ✅ Consistency Garantie
+- **Environnement identique** sur toutes les machines (Windows, macOS, Linux)
+- **Versions figées** des dépendances et services
+- **Isolation complète** des dépendances système
+- **Reproductibilité** parfaite des bugs et tests
+
+### ✅ Développement Efficace
+- **Hot-reload** automatique pour le backend et frontend
+- **Logs centralisés** et structurés
+- **Debug facile** avec Docker logs
+- **Arrêt/redémarrage rapide** des services
+
+### ✅ Production Ready
+- **Même configuration** en dev et production
+- **Monitoring intégré** avec health checks
+- **Scalabilité** facile avec Docker Swarm/Kubernetes
+- **Sécurité** avec isolation des conteneurs
 
 ## 📊 API Documentation
 

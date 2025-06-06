@@ -2,7 +2,7 @@ import time
 import logging # Changed from app.logger import DexLogger to standard logging
 from typing import Dict, Any, Optional
 
-from app.config_v2 import get_config
+from app.config import get_config
 from app.trading.trading_engine import TradingEngine
 from app.portfolio_manager import PortfolioManager
 from app.risk_manager import RiskManager, Position

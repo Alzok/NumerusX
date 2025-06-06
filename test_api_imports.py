@@ -97,7 +97,7 @@ def test_database_creation():
     
     try:
         from app.database import EnhancedDatabase
-        from app.config import Config
+        from app.config import get_config
         
         # Test with in-memory database
         db = EnhancedDatabase(db_path=":memory:")

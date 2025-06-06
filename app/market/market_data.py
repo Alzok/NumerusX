@@ -6,7 +6,7 @@ import time
 from cachetools import TTLCache
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from app.config_v2 import get_config
+from app.config import get_config
 # from app.utils.jupiter_api_client import JupiterApiClient  # Temporarily disabled - SDK not installed
 from app.utils.exceptions import (
     JupiterAPIError, DexScreenerAPIError, SolanaTransactionError, 

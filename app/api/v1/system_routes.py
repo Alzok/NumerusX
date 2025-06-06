@@ -6,6 +6,7 @@ Handles system health, monitoring, and maintenance.
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from datetime import datetime, timedelta
+from typing import Dict, Any
 import psutil
 import os
 import logging
@@ -40,7 +41,7 @@ async def get_system_health():
     """Get comprehensive system health status - no auth required for monitoring."""
     try:
         import redis
-        from app.config_v2 import get_config
+        from app.config import get_config
         from app.database import EnhancedDatabase
         
         # Get system metrics

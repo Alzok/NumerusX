@@ -1,39 +1,32 @@
 import unittest
-from app.config import Config
+from app.config import get_config
 
 class TestConfigJupiterV6(unittest.TestCase):
 
     def setUp(self):
-        self.config = Config()
+        self.config = get_config()
 
     def test_jupiter_api_hostnames_exist(self):
-        self.assertTrue(hasattr(self.config, 'JUPITER_LITE_API_HOSTNAME'), "JUPITER_LITE_API_HOSTNAME missing")
-        self.assertTrue(hasattr(self.config, 'JUPITER_PRO_API_HOSTNAME'), "JUPITER_PRO_API_HOSTNAME missing")
-        self.assertIsNotNone(self.config.JUPITER_LITE_API_HOSTNAME, "JUPITER_LITE_API_HOSTNAME is None")
-        self.assertIsNotNone(self.config.JUPITER_PRO_API_HOSTNAME, "JUPITER_PRO_API_HOSTNAME is None")
-        self.assertIsInstance(self.config.JUPITER_LITE_API_HOSTNAME, str, "JUPITER_LITE_API_HOSTNAME is not a string")
-        self.assertIsInstance(self.config.JUPITER_PRO_API_HOSTNAME, str, "JUPITER_PRO_API_HOSTNAME is not a string")
+        self.assertIsNotNone(self.config.jupiter.lite_api_hostname, "JUPITER_LITE_API_HOSTNAME is None")
+        self.assertIsNotNone(self.config.jupiter.pro_api_hostname, "JUPITER_PRO_API_HOSTNAME is None")
+        self.assertIsInstance(self.config.jupiter.lite_api_hostname, str, "JUPITER_LITE_API_HOSTNAME is not a string")
+        self.assertIsInstance(self.config.jupiter.pro_api_hostname, str, "JUPITER_PRO_API_HOSTNAME is not a string")
 
     def test_jupiter_api_paths_exist(self):
         # Test a few key paths
-        self.assertTrue(hasattr(self.config, 'JUPITER_SWAP_API_PATH'), "JUPITER_SWAP_API_PATH missing")
-        self.assertIsNotNone(self.config.JUPITER_SWAP_API_PATH, "JUPITER_SWAP_API_PATH is None")
-        self.assertTrue(hasattr(self.config, 'JUPITER_PRICE_API_PATH'), "JUPITER_PRICE_API_PATH missing")
-        self.assertIsNotNone(self.config.JUPITER_PRICE_API_PATH, "JUPITER_PRICE_API_PATH is None")
+        self.assertIsNotNone(self.config.jupiter.swap_api_path, "JUPITER_SWAP_API_PATH is None")
+        self.assertIsNotNone(self.config.jupiter.price_api_path, "JUPITER_PRICE_API_PATH is None")
 
     def test_jupiter_transaction_parameters_exist(self):
-        self.assertTrue(hasattr(self.config, 'JUPITER_DEFAULT_SLIPPAGE_BPS'), "JUPITER_DEFAULT_SLIPPAGE_BPS missing")
-        self.assertIsNotNone(self.config.JUPITER_DEFAULT_SLIPPAGE_BPS, "JUPITER_DEFAULT_SLIPPAGE_BPS is None")
-        self.assertIsInstance(self.config.JUPITER_DEFAULT_SLIPPAGE_BPS, int, "JUPITER_DEFAULT_SLIPPAGE_BPS is not an int")
+        self.assertIsNotNone(self.config.jupiter.default_slippage_bps, "JUPITER_DEFAULT_SLIPPAGE_BPS is None")
+        self.assertIsInstance(self.config.jupiter.default_slippage_bps, int, "JUPITER_DEFAULT_SLIPPAGE_BPS is not an int")
         
-        self.assertTrue(hasattr(self.config, 'JUPITER_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS'), "JUPITER_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS missing")
-        # This can be None if not set, so we only check existence or type if not None
-        if hasattr(self.config, 'JUPITER_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS') and self.config.JUPITER_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS is not None:
-            self.assertIsInstance(self.config.JUPITER_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS, (int, str)) # Can be int or "auto"
+        # This can be None if not set, so we only check type if not None
+        if self.config.jupiter.compute_unit_price_micro_lamports is not None:
+            self.assertIsInstance(self.config.jupiter.compute_unit_price_micro_lamports, str) # Should be string
 
-        self.assertTrue(hasattr(self.config, 'JUPITER_MAX_RETRIES'), "JUPITER_MAX_RETRIES missing")
-        self.assertIsNotNone(self.config.JUPITER_MAX_RETRIES, "JUPITER_MAX_RETRIES is None")
-        self.assertIsInstance(self.config.JUPITER_MAX_RETRIES, int, "JUPITER_MAX_RETRIES is not an int")
+        self.assertIsNotNone(self.config.jupiter.max_retries, "JUPITER_MAX_RETRIES is None")
+        self.assertIsInstance(self.config.jupiter.max_retries, int, "JUPITER_MAX_RETRIES is not an int")
 
     def test_jupiter_deprecated_constants_still_accessible_or_none(self):
         # Example: Check if a deprecated constant is either gone, None, or has a specific value if retained

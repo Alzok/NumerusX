@@ -12,7 +12,7 @@ import aiohttp
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from app.market.market_data import MarketDataProvider
-from app.config_v2 import get_config, EncryptionUtil
+from app.config import get_config, EncryptionService
 from app.utils.jupiter_api_client import JupiterApiClient
 from app.utils.exceptions import (
     JupiterAPIError, SolanaTransactionError, TransactionExpiredError, 
@@ -39,7 +39,7 @@ class TradingEngine:
             rpc_url: URL du point de terminaison RPC Solana. Utilise get_config().solana.rpc_url par défaut.
         """
         self.config = get_config() # Initialize Config instance
-        self.rpc_url = rpc_url if rpc_url is not None else self.get_config().solana.rpc_url
+        self.rpc_url = rpc_url if rpc_url is not None else self.config.solana.rpc_url
         self.client = AsyncClient(self.rpc_url)
         self.wallet = self._initialize_wallet(wallet_path)
         self.market_data_provider = None
@@ -69,7 +69,7 @@ class TradingEngine:
                 # The _initialize_wallet tries to load from file or env (SOLANA_PRIVATE_KEY_BS58).
                 # So, SOLANA_PRIVATE_KEY_BS58 should be available in self.config if that was the source.
                 
-                private_key_for_jupiter = self.get_config().solana.private_key_bs58 
+                private_key_for_jupiter = self.config.solana.private_key_bs58 
                 if not private_key_for_jupiter:
                     # Fallback: If wallet was loaded from a file and not env var, we might need to derive bs58 from keypair if possible
                     # Or ensure that the primary_wallet_path content *is* the bs58 key if used for Jupiter.
@@ -110,11 +110,11 @@ class TradingEngine:
         decrypted_content = None
 
         # Attempt decryption if MASTER_ENCRYPTION_KEY is available in Config and usable
-        if get_config().MASTER_ENCRYPTION_KEY_ENV: # Check if key is set
+        if os.getenv('MASTER_ENCRYPTION_KEY'): # Check if key is set
             logger.debug(f"MASTER_ENCRYPTION_KEY is set. Attempting to decrypt content of {file_path}.")
-            # EncryptionUtil.decrypt expects base64 encoded ciphertext.
+            # EncryptionService.decrypt expects base64 encoded ciphertext.
             # We assume the file content *is* the base64 encoded ciphertext.
-            decrypted_content = EncryptionUtil.decrypt(raw_content)
+            decrypted_content = EncryptionService.decrypt(raw_content)
             if decrypted_content:
                 logger.info(f"Successfully decrypted content from {file_path}.")
                 content_to_parse = decrypted_content
@@ -370,8 +370,8 @@ class TradingEngine:
         if amount_in_tokens_float and amount_in_usd:
             return {'success': False, 'error': "Provide either amount_in_tokens_float or amount_in_usd, not both.", 'signature': None, 'details': None}
 
-        final_slippage_bps = slippage_bps if slippage_bps is not None else self.get_config().jupiter.default_slippage_bps
-        final_swap_mode = swap_mode if swap_mode is not None else self.config.JUPITER_SWAP_MODE
+        final_slippage_bps = slippage_bps if slippage_bps is not None else self.config.jupiter.default_slippage_bps
+        final_swap_mode = swap_mode if swap_mode is not None else self.config.jupiter.swap_mode
 
         amount_lamports: Optional[int] = None
 
@@ -462,7 +462,7 @@ class TradingEngine:
         return self.market_data_provider
 
     @retry(
-        stop=stop_after_attempt(get_config().JUPITER_MAX_RETRIES if hasattr(Config, 'JUPITER_MAX_RETRIES') else 3),
+        stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=5),
         retry=retry_if_exception_type(TransactionExpiredError),
         reraise=True # Reraise the exception if all retries fail

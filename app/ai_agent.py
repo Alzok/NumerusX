@@ -4,7 +4,7 @@ import json # Added for logging and example
 import time # Added for example
 import asyncio # Added for async decide_trade
 
-from app.config_v2 import get_config
+from app.config import get_config
 # Placeholder for other necessary imports, e.g., data providers, engines
 # from app.market.market_data import MarketDataProvider
 # from app.prediction_engine import PredictionEngine

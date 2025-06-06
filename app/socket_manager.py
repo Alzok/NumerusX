@@ -5,7 +5,7 @@ from datetime import datetime
 import jwt
 from jwt import InvalidTokenError
 
-from app.config_v2 import get_config
+from app.config import get_config
 
 logger = logging.getLogger(__name__)
 

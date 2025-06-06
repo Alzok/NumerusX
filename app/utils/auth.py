@@ -1,8 +1,10 @@
 import jwt
+import logging
+from fastapi import status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, SecurityScopes
 from typing import Optional
 
-from app.config_v2 import get_config
+from app.config import get_config
 from app.utils.exceptions import NumerusXBaseError # Assuming you have custom exceptions
 
 class AuthError(NumerusXBaseError):
@@ -25,19 +27,22 @@ token_auth_scheme = HTTPBearer()
 class VerifyToken:
     """Does all the token verification using PyJWT."""
     def __init__(self):
-        self.jwks_uri = get_config().AUTH_PROVIDER_JWKS_URI
-        self.audience = get_config().AUTH_PROVIDER_AUDIENCE
-        self.issuer = get_config().AUTH_PROVIDER_ISSUER
-        self.algorithms = [get_config().AUTH_PROVIDER_ALGORITHMS]
+        self.jwks_uri = get_config().security.auth_provider_jwks_uri
+        self.audience = get_config().security.auth_provider_audience
+        self.issuer = get_config().security.auth_provider_issuer
+        self.algorithms = [get_config().security.auth_provider_algorithms]
 
         if not all([self.jwks_uri, self.audience, self.issuer]):
-            # This is a server configuration error, should ideally prevent startup
-            raise RuntimeError(
-                "Auth provider JWKS URI, Audience, or Issuer not configured. "
-                "Please set AUTH_PROVIDER_JWKS_URI, AUTH_PROVIDER_AUDIENCE, and AUTH_PROVIDER_ISSUER."
-            )
+            # En mode développement, l'authentification peut être optionnelle
+            if get_config().app.environment.value == "production":
+                raise RuntimeError(
+                    "Auth provider JWKS URI, Audience, or Issuer not configured. "
+                    "Please set AUTH_PROVIDER_JWKS_URI, AUTH_PROVIDER_AUDIENCE, and AUTH_PROVIDER_ISSUER."
+                )
+            else:
+                logging.warning("Auth provider not configured - authentication will be disabled in dev mode")
         
-        self.jwks_client = jwt.PyJWKClient(self.jwks_uri)
+        self.jwks_client = jwt.PyJWKClient(self.jwks_uri) if self.jwks_uri else None
 
     async def verify(self,
                      security_scopes: SecurityScopes, # FastAPI uses this for OAuth2 scopes, can be ignored if not using scopes
@@ -45,6 +50,11 @@ class VerifyToken:
                      ):
         if token is None:
             raise MissingTokenAuthError()
+        
+        # En mode dev sans auth configuré, on accepte tous les tokens
+        if not self.jwks_client:
+            logging.warning("Authentication bypassed - dev mode without auth configuration")
+            return {"sub": "dev_user", "email": "dev@numerusx.com"}
         
         unverified_token_credentials = token.credentials
 

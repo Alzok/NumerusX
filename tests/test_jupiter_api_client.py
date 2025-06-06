@@ -15,7 +15,7 @@ from jupiter_python_sdk.jupiter import Jupiter # For type hinting if needed
 from jupiter_python_sdk.models import QuoteResponse, SwapResponse, TxResponse # For mocking returns
 from jupiter_python_sdk.exceptions import JupiterPythonSdkError, TransactionExpiredBlockheightExceededError # Import base SDK error for mocking
 
-from app.config import Config
+from app.config import get_config
 from app.utils.jupiter_api_client import JupiterApiClient
 from app.utils.exceptions import (
     JupiterAPIError, SolanaTransactionError, TransactionExpiredError,

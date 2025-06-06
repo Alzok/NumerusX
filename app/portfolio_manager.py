@@ -1,5 +1,5 @@
 from app.database import EnhancedDatabase
-from app.config_v2 import get_config
+from app.config import get_config
 from app.market.market_data import MarketDataProvider # Import MarketDataProvider
 from typing import List, Dict, Optional, Any
 import logging

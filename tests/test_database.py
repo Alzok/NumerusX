@@ -3,7 +3,7 @@ import sqlite3
 import json
 import os
 from app.database import EnhancedDatabase
-from app.config import Config # For DB_PATH, though we'll override
+from app.config import get_config # For DB_PATH, though we'll override
 
 # Sample data for new fields
 SAMPLE_JUPITER_QUOTE_RESPONSE = {"inputMint": "SOL", "outAmount": "150000000"}

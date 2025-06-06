@@ -7,7 +7,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import aiohttp
 import sqlite3
 from dataclasses import dataclass
-from app.config_v2 import get_config
+from app.config import get_config
 from app.market.market_data import MarketDataProvider
 import jwt
 from datetime import datetime, timedelta

@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles # Added StaticFiles
 from fastapi.templating import Jinja2Templates # Added Jinja2Templates (optional, for serving index.html)
 from fastapi.middleware.cors import CORSMiddleware # Added CORSMiddleware
 
-from app.config_v2 import get_config
+from app.config import get_config
 from app.utils.auth import VerifyToken, AuthError # Import VerifyToken and AuthError
 from app.socket_manager import get_socket_manager # Import the new socket manager
 
@@ -40,14 +40,14 @@ app = FastAPI(
 # Ensure get_config().CORS_ALLOWED_ORIGINS is defined and loaded correctly in your Config class.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_config().CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"],
+    allow_origins=get_config().app.cors_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"], # Allows all methods
     allow_headers=["*"], # Allows all headers
 )
 
 # Initialize SocketManager and get the app and server instance
-cors_origins = get_config().CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"]
+cors_origins = get_config().app.cors_allowed_origins
 socket_man = get_socket_manager(cors_allowed_origins=cors_origins)
 sio = socket_man.sio # This is the socketio.AsyncServer instance
 # Mount the Socket.IO app. The SocketManager's app is already configured.
@@ -80,6 +80,10 @@ else:
 
 # Include API router
 app.include_router(api_router, prefix="/api/v1")
+
+# Include onboarding router
+from app.api.v1.onboarding_routes import router as onboarding_router
+app.include_router(onboarding_router)
 
 auth_verifier = VerifyToken() # Initialize the token verifier
 
@@ -206,7 +210,7 @@ background_tasks = set()
 def configure_logging():
     """Configuration avancée du système de logging"""
     # Ensure get_config().LOG_LEVEL and get_config().get_log_file_path() are valid
-    log_level_str = getattr(Config, 'LOG_LEVEL', 'INFO').upper()
+    log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
     
     logger = logging.getLogger() # Get root logger
@@ -220,7 +224,8 @@ def configure_logging():
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    log_file_path = get_config().get_log_file_path() if hasattr(Config, 'get_log_file_path') else "numerusx.log"
+    log_file_path = os.path.join("logs", "numerusx.log")
+    os.makedirs("logs", exist_ok=True)
 
     # Handler pour fichiers logs
     file_handler = RotatingFileHandler(
@@ -246,14 +251,14 @@ def check_environment():
     missing = []
     
     # Check for MASTER_ENCRYPTION_KEY which is the current encryption system
-    if not hasattr(Config, 'MASTER_ENCRYPTION_KEY_ENV') or not get_config().MASTER_ENCRYPTION_KEY_ENV:
+    if not os.getenv('MASTER_ENCRYPTION_KEY'):
         missing.append('MASTER_ENCRYPTION_KEY')
     
     # Check for Solana private key (either plain or encrypted)
     has_solana_key = (
-        (hasattr(Config, 'SOLANA_PRIVATE_KEY_BS58') and get_config().solana.private_key_bs58) or
-        (hasattr(Config, 'ENCRYPTED_SOLANA_PRIVATE_KEY_BS58') and get_config().ENCRYPTED_SOLANA_PRIVATE_KEY_BS58) or
-        (hasattr(Config, 'WALLET_PATH') and get_config().solana.wallet_path and os.path.exists(get_config().solana.wallet_path))
+        get_config().solana.private_key_bs58 or
+        os.getenv('ENCRYPTED_SOLANA_PRIVATE_KEY_BS58') or
+        (get_config().solana.wallet_path and os.path.exists(get_config().solana.wallet_path))
     )
     
     if not has_solana_key:

@@ -7,7 +7,7 @@ except ImportError:
     import pandas as pd
 import numpy as np
 import logging
-from app.config_v2 import get_config
+from app.config import get_config
 from app.strategy_framework import BaseStrategy
 
 class AdvancedTradingStrategy(BaseStrategy):

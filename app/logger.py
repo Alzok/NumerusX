@@ -1,7 +1,7 @@
 import logging
 import json
 from logging.handlers import RotatingFileHandler
-from app.config_v2 import get_config
+from app.config import get_config
 
 class DexLogger:
     def __init__(self):

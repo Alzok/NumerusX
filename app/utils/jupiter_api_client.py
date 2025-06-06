@@ -11,7 +11,7 @@ from solders.transaction import VersionedTransaction
 
 from solana.rpc.async_api import AsyncClient
 # Import Config using alias to avoid naming conflicts with solders.rpc.config
-from app.config_v2 import get_config as AppConfig
+from app.config import get_config as AppConfig
 
 # Assuming jupiter_python_sdk is installed and its structure is as expected.
 # These imports might need adjustment based on the actual SDK structure.

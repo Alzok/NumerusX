@@ -9,7 +9,7 @@ from app.utils.exceptions import (
     JupiterAPIError, SolanaTransactionError, TransactionExpiredError,
     TransactionBroadcastError, TransactionConfirmationError, NumerusXBaseError
 )
-from app.config import Config
+from app.config import get_config
 from solders.keypair import Keypair # For mocking wallet
 from solders.pubkey import Pubkey
 

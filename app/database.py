@@ -1,7 +1,8 @@
 import sqlite3
 import json
 import os
-from app.config_v2 import get_config
+from typing import Optional, Dict, List
+from app.config import get_config
 import logging
 from datetime import datetime
 import uuid
@@ -149,6 +150,44 @@ class EnhancedDatabase:
                     risk_score REAL,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 );
+
+                -- App configuration table
+                CREATE TABLE IF NOT EXISTS app_configuration (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT UNIQUE NOT NULL,
+                    value TEXT NOT NULL,
+                    value_type TEXT NOT NULL CHECK (value_type IN ('string', 'integer', 'float', 'boolean', 'json', 'encrypted')),
+                    description TEXT,
+                    category TEXT NOT NULL,
+                    is_required BOOLEAN DEFAULT FALSE,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
+
+                -- User preferences table
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    preference_key TEXT NOT NULL,
+                    preference_value TEXT NOT NULL,
+                    value_type TEXT NOT NULL CHECK (value_type IN ('string', 'integer', 'float', 'boolean', 'json')),
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, preference_key)
+                );
+
+                -- System status table for application state
+                CREATE TABLE IF NOT EXISTS system_status (
+                    id INTEGER PRIMARY KEY,
+                    is_configured BOOLEAN DEFAULT FALSE,
+                    operating_mode TEXT DEFAULT 'test' CHECK (operating_mode IN ('test', 'production')),
+                    theme_name TEXT DEFAULT 'default',
+                    theme_palette TEXT DEFAULT 'slate',
+                    last_configuration_update DATETIME,
+                    configuration_version INTEGER DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                );
             ''')
 
             # Create indexes for performance
@@ -182,6 +221,14 @@ class EnhancedDatabase:
                 
                 -- Portfolio snapshots indexes
                 CREATE INDEX IF NOT EXISTS idx_portfolio_timestamp ON portfolio_snapshots(timestamp_utc);
+                
+                -- App configuration indexes
+                CREATE INDEX IF NOT EXISTS idx_config_key ON app_configuration(key);
+                CREATE INDEX IF NOT EXISTS idx_config_category ON app_configuration(category);
+                
+                -- User preferences indexes
+                CREATE INDEX IF NOT EXISTS idx_prefs_user ON user_preferences(user_id);
+                CREATE INDEX IF NOT EXISTS idx_prefs_key ON user_preferences(preference_key);
             ''')
 
     def record_trade(self, trade_data: dict):
@@ -469,3 +516,277 @@ class EnhancedDatabase:
         """Close database connection."""
         if self.conn:
             self.conn.close()
+
+    # Configuration Management Methods
+    def initialize_system_status(self):
+        """Initialize system status if not exists."""
+        try:
+            with self.conn:
+                cursor = self.conn.execute("SELECT COUNT(*) FROM system_status WHERE id = 1")
+                if cursor.fetchone()[0] == 0:
+                    self.conn.execute("""
+                        INSERT INTO system_status (id, is_configured, operating_mode, theme_name, theme_palette)
+                        VALUES (1, FALSE, 'test', 'default', 'slate')
+                    """)
+            return True
+        except Exception as e:
+            self.logger.error(f"Error initializing system status: {e}")
+            return False
+
+    def is_app_configured(self) -> bool:
+        """Check if the application has been configured."""
+        try:
+            cursor = self.conn.execute("SELECT is_configured FROM system_status WHERE id = 1")
+            result = cursor.fetchone()
+            return bool(result[0]) if result else False
+        except Exception as e:
+            self.logger.error(f"Error checking app configuration status: {e}")
+            return False
+
+    def set_app_configured(self, configured: bool = True):
+        """Mark the application as configured."""
+        try:
+            with self.conn:
+                self.conn.execute("""
+                    INSERT OR REPLACE INTO system_status 
+                    (id, is_configured, last_configuration_update, updated_at)
+                    VALUES (1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (configured,))
+            return True
+        except Exception as e:
+            self.logger.error(f"Error setting app configured status: {e}")
+            return False
+
+    def save_configuration(self, config_data: Dict[str, any]) -> bool:
+        """Save configuration data to database."""
+        try:
+            with self.conn:
+                for category, settings in config_data.items():
+                    if isinstance(settings, dict):
+                        for key, value in settings.items():
+                            self._save_config_item(key, value, category)
+                    else:
+                        self._save_config_item(category, settings, "general")
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving configuration: {e}")
+            return False
+
+    def _save_config_item(self, key: str, value: any, category: str):
+        """Save individual configuration item."""
+        from app.utils.encryption import EncryptionService
+        
+        # Determine value type and whether to encrypt
+        is_sensitive = self._is_sensitive_key(key)
+        
+        if is_sensitive:
+            encrypted_value = EncryptionService.encrypt_data(str(value))
+            value_to_store = encrypted_value
+            type_to_store = "encrypted"
+        else:
+            if isinstance(value, (dict, list)):
+                value_to_store = json.dumps(value)
+                type_to_store = "json"
+            elif isinstance(value, bool):
+                value_to_store = str(value).lower()
+                type_to_store = "boolean"
+            elif isinstance(value, int):
+                value_to_store = str(value)
+                type_to_store = "integer"
+            elif isinstance(value, float):
+                value_to_store = str(value)
+                type_to_store = "float"
+            else:
+                value_to_store = str(value)
+                type_to_store = "string"
+
+        self.conn.execute("""
+            INSERT OR REPLACE INTO app_configuration 
+            (key, value, value_type, category, is_required, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        """, (key, value_to_store, type_to_store, category, is_sensitive))
+
+    def _is_sensitive_key(self, key: str) -> bool:
+        """Check if a configuration key contains sensitive data."""
+        sensitive_keywords = [
+            'api_key', 'secret', 'password', 'private_key', 'token', 
+            'jwt', 'encryption', 'wallet', 'credentials'
+        ]
+        return any(keyword in key.lower() for keyword in sensitive_keywords)
+
+    def load_configuration(self) -> Dict[str, any]:
+        """Load configuration from database."""
+        try:
+            from app.utils.encryption import EncryptionService
+            
+            cursor = self.conn.execute("""
+                SELECT key, value, value_type, category 
+                FROM app_configuration 
+                ORDER BY category, key
+            """)
+            
+            config = {}
+            for row in cursor.fetchall():
+                key, value, value_type, category = row
+                
+                # Decrypt if encrypted
+                if value_type == "encrypted":
+                    try:
+                        decrypted_value = EncryptionService.decrypt_data(value)
+                        parsed_value = decrypted_value
+                    except Exception as e:
+                        self.logger.warning(f"Failed to decrypt config key {key}: {e}")
+                        continue
+                elif value_type == "json":
+                    parsed_value = json.loads(value)
+                elif value_type == "boolean":
+                    parsed_value = value.lower() in ('true', '1', 'yes')
+                elif value_type == "integer":
+                    parsed_value = int(value)
+                elif value_type == "float":
+                    parsed_value = float(value)
+                else:
+                    parsed_value = value
+
+                # Organize by category
+                if category not in config:
+                    config[category] = {}
+                config[category][key] = parsed_value
+
+            return config
+        except Exception as e:
+            self.logger.error(f"Error loading configuration: {e}")
+            return {}
+
+    def get_system_status(self) -> Dict[str, any]:
+        """Get current system status."""
+        try:
+            cursor = self.conn.execute("""
+                SELECT is_configured, operating_mode, theme_name, theme_palette,
+                       last_configuration_update, configuration_version
+                FROM system_status WHERE id = 1
+            """)
+            result = cursor.fetchone()
+            
+            if result:
+                return {
+                    'is_configured': bool(result[0]),
+                    'operating_mode': result[1],
+                    'theme_name': result[2], 
+                    'theme_palette': result[3],
+                    'last_configuration_update': result[4],
+                    'configuration_version': result[5]
+                }
+            else:
+                # Initialize if not exists
+                self.initialize_system_status()
+                return {
+                    'is_configured': False,
+                    'operating_mode': 'test',
+                    'theme_name': 'default',
+                    'theme_palette': 'slate',
+                    'last_configuration_update': None,
+                    'configuration_version': 1
+                }
+        except Exception as e:
+            self.logger.error(f"Error getting system status: {e}")
+            return {}
+
+    def update_system_status(self, **kwargs) -> bool:
+        """Update system status with provided parameters."""
+        try:
+            # Build dynamic UPDATE SQL based on provided kwargs
+            valid_fields = ['is_configured', 'operating_mode', 'theme_name', 'theme_palette']
+            update_fields = []
+            values = []
+            
+            for field, value in kwargs.items():
+                if field in valid_fields:
+                    update_fields.append(f"{field} = ?")
+                    values.append(value)
+            
+            if not update_fields:
+                return False
+            
+            # First, ensure record exists
+            self.conn.execute("""
+                INSERT OR IGNORE INTO system_status 
+                (id, is_configured, operating_mode, theme_name, theme_palette, created_at, updated_at)
+                VALUES (1, 0, 'test', 'default', 'slate', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """)
+            
+            # Then update
+            sql = f"""
+                UPDATE system_status 
+                SET {', '.join(update_fields)}, updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+            """
+            
+            with self.conn:
+                self.conn.execute(sql, values)
+            return True
+        except Exception as e:
+            self.logger.error(f"Error updating system status: {e}")
+            return False
+
+    def save_user_preference(self, user_id: str, key: str, value: any) -> bool:
+        """Save user preference."""
+        try:
+            if isinstance(value, (dict, list)):
+                value_str = json.dumps(value)
+                value_type = "json"
+            elif isinstance(value, bool):
+                value_str = str(value).lower()
+                value_type = "boolean"
+            elif isinstance(value, int):
+                value_str = str(value)
+                value_type = "integer"
+            elif isinstance(value, float):
+                value_str = str(value)
+                value_type = "float"
+            else:
+                value_str = str(value)
+                value_type = "string"
+            
+            with self.conn:
+                self.conn.execute("""
+                    INSERT OR REPLACE INTO user_preferences 
+                    (user_id, preference_key, preference_value, value_type, updated_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (user_id, key, value_str, value_type))
+            return True
+        except Exception as e:
+            self.logger.error(f"Error saving user preference: {e}")
+            return False
+
+    def get_user_preferences(self, user_id: str) -> Dict[str, any]:
+        """Get all user preferences."""
+        try:
+            cursor = self.conn.execute("""
+                SELECT preference_key, preference_value, value_type 
+                FROM user_preferences 
+                WHERE user_id = ?
+                ORDER BY preference_key
+            """, (user_id,))
+            
+            preferences = {}
+            for row in cursor.fetchall():
+                key, value, value_type = row
+                
+                if value_type == "json":
+                    parsed_value = json.loads(value)
+                elif value_type == "boolean":
+                    parsed_value = value.lower() in ('true', '1', 'yes')
+                elif value_type == "int":
+                    parsed_value = int(value)
+                elif value_type == "float":
+                    parsed_value = float(value)
+                else:
+                    parsed_value = value
+                    
+                preferences[key] = parsed_value
+                
+            return preferences
+        except Exception as e:
+            self.logger.error(f"Error getting user preferences: {e}")
+            return {}

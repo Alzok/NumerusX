@@ -8,7 +8,7 @@ from app.strategy_selector import StrategySelector # Import StrategySelector
 import time
 import logging
 from typing import List, Dict, Optional, Any, Tuple # Added Tuple
-from app.config_v2 import get_config
+from app.config import get_config
 from app.portfolio_manager import PortfolioManager # Ensure this is the main PortfolioManager
 from app.trade_executor import TradeExecutor # Import TradeExecutor
 from app.ai_agent import AIAgent # Import the new AIAgent

@@ -12,7 +12,7 @@ import os
 import logging
 
 from app.api.v1.auth_routes import require_auth, User, verify_token, TokenData
-from app.config import Config
+from app.config import get_config
 
 router = APIRouter(prefix="/api/v1/config", tags=["configuration"])
 logger = logging.getLogger(__name__)

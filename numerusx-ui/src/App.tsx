@@ -13,6 +13,7 @@ import LoginPage from '@/pages/LoginPage';
 import { AuthenticationGuard } from '@/components/auth/AuthenticationGuard';
 import { initSocketConnection, disconnectSocket } from '@/lib/socketClient';
 import { useApiClient } from '@/hooks/useApiClient';
+import OnboardingManager from '@/components/onboarding/OnboardingManager';
 import './App.css';
 
 // Layout component for authenticated routes
@@ -134,16 +135,18 @@ const ProtectedRoutes: React.FC = () => {
   }, [isAuthenticated, getAccessTokenSilently]);
 
   return (
-    <AppLayout>
-      <Routes>
-        <Route index element={<Navigate to="/dashboard" replace />} />
-        <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="trading" element={<TradingPage />} />
-        <Route path="command" element={<CommandPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} /> 
-      </Routes>
-    </AppLayout>
+    <OnboardingManager>
+      <AppLayout>
+        <Routes>
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="dashboard" element={<DashboardPage />} />
+          <Route path="trading" element={<TradingPage />} />
+          <Route path="command" element={<CommandPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} /> 
+        </Routes>
+      </AppLayout>
+    </OnboardingManager>
   );
 };
 

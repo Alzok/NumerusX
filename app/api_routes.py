@@ -2,7 +2,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import logging
 
-from app.config_v2 import get_config
+from app.config import get_config
 from app.security.security import Security
 from app.trading.trading_engine import TradingEngine
 from app.analytics_engine import AdvancedTradingStrategy

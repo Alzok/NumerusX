@@ -6,7 +6,7 @@ import json
 from app.market.market_data import MarketDataProvider
 from app.utils.jupiter_api_client import JupiterApiClient # For type hinting
 from app.utils.exceptions import JupiterAPIError, DexScreenerAPIError, NumerusXBaseError
-from app.config import Config # For potential config mocking or access
+from app.config import get_config # For potential config mocking or access
 
 # Sample mint addresses
 SOL_MINT = "So11111111111111111111111111111111111111112"

@@ -5,7 +5,7 @@ from solana.keypair import Keypair
 from solana.publickey import PublicKey
 from solana.rpc.api import Client
 from solana.rpc.types import TokenAccountOpts
-from app.config_v2 import get_config
+from app.config import get_config
 
 class SolanaWallet:
     def __init__(self, private_key: Optional[str] = None):

@@ -1,5 +1,5 @@
 import google.generativeai as genai
-from app.config_v2 import get_config
+from app.config import get_config
 import logging
 from typing import Dict, Any, Optional
 import asyncio

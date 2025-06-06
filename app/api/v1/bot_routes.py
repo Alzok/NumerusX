@@ -6,6 +6,7 @@ Handles bot start/stop, status, and configuration.
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import Optional, List
 import asyncio
 import logging
 
@@ -34,7 +35,7 @@ class BotConfig(BaseModel):
     cycle_interval_seconds: int = Field(default=30, ge=5, le=3600)
     max_trades_per_day: int = Field(default=10, ge=1, le=100)
     daily_loss_limit_usd: float = Field(default=1000, gt=0)
-    enabled_strategies: list[str] = Field(default_factory=list)
+    enabled_strategies: List[str] = Field(default_factory=list)
     risk_level: str = Field(default="MODERATE")
     auto_start: bool = Field(default=False)
 

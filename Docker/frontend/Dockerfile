@@ -6,11 +6,12 @@ WORKDIR /app
 # Copy package.json and package-lock.json first for better caching
 COPY numerusx-ui/package*.json ./numerusx-ui/
 
-# Copy the initialization script into the container
-COPY Docker/frontend/init-frontend.sh /app/init-frontend.sh
+# Copy .env.example and entrypoint script
+COPY numerusx-ui/.env.example ./numerusx-ui/
+COPY Docker/frontend/entrypoint.sh /app/
 
 # Make the script executable
-RUN chmod +x /app/init-frontend.sh
+RUN chmod +x /app/entrypoint.sh
 
 # Install system dependencies needed for node-gyp and native modules
 RUN apk add --no-cache python3 make g++
@@ -18,6 +19,8 @@ RUN apk add --no-cache python3 make g++
 # Expose the Vite default port
 EXPOSE 5173
 
-# Command to run the initialization script
-# The script will handle 'npm install' and 'npm run dev'
-CMD ["/app/init-frontend.sh"] 
+# Use entrypoint script
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Command to run Vite dev server
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"] 

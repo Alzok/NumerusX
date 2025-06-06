@@ -35,15 +35,15 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # Mount source code for hot reload during development
       - ./app:/code/app
       - ./data:/code/data
       - ./logs:/code/logs
       - ./keys:/code/keys
       - ./models:/code/models
-      # Mount .env file directly for backend to use
-      - ./.env:/code/.env 
-    env_file:
-      - ./.env
+      # Mount .env files so entrypoint can manage them
+      - ./.env.example:/code/.env.example
+      - ./.env:/code/.env
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
@@ -59,8 +59,6 @@ services:
       start_period: 30s
     networks:
       - numerusx-network
-    # Command is defined in Dockerfile, but can be overridden here if needed
-    # command: uvicorn app.main:final_asgi_app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
 
   # Frontend - Démarre après Backend
   frontend:
@@ -72,14 +70,10 @@ services:
     ports:
       - "5173:5173"
     volumes:
-      # Mount the entire numerusx-ui directory from host to container
-      # This allows the init-frontend.sh script to create files on the host
-      # and for live reloading during development.
+      # Mount the entire numerusx-ui directory for hot reload during development
       - ./numerusx-ui:/app/numerusx-ui
       # Mount logo if needed
       - ./logo.jpg:/app/logo.jpg
-      # Mount .env files for frontend
-      - ./numerusx-ui/.env:/app/numerusx-ui/.env
     environment:
       - NODE_ENV=development
       - VITE_API_URL=http://localhost:8000
