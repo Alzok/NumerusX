@@ -102,6 +102,8 @@ docker-compose down
 - `GOOGLE_API_KEY` - Clé Gemini 2.5 Flash (obligatoire)
 - `SOLANA_PRIVATE_KEY_BS58` - Clé Solana pour trading (obligatoire pour prod)
 - `AUTH_PROVIDER_JWKS_URI` - Auth0 JWKS URI (obligatoire)
+- `AUTH_PROVIDER_AUDIENCE` - Auth0 API audience (obligatoire)  
+- `AUTH_PROVIDER_ISSUER` - Auth0 domain issuer (obligatoire)
 - `JWT_SECRET_KEY` - Signature tokens (obligatoire)
 
 **Frontend (`numerusx-ui/.env`):**

@@ -13,3 +13,4 @@ __pycache__
 
 *.pyc
 python3.12/
+jupiter_test_env/
