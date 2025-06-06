@@ -13,7 +13,6 @@ L'authentification Auth0 est maintenant **intégrée et obligatoire** pour accé
 ### **Domaine Auth0 Configuré**
 - **Domaine** : `numerus.eu.auth0.com`
 - **API Audience** : `https://numerus.eu.auth0.com/api/v2/`
-- **Grant ID** : `cgr_iEa1mQA42Yuu0o4Y`
 
 ### **Applications Auth0 à Créer**
 
