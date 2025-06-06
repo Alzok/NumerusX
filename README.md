@@ -16,6 +16,13 @@ NumerusX is an advanced AI-powered cryptocurrency trading bot specifically desig
 - **🛡️ Risk Management**: Built-in stop-loss, take-profit, and portfolio optimization
 - **🔧 Development Tools**: Complete dev-tools script with 20+ commands for easy development
 
+### 🆕 **Nouvelles Fonctionnalités Avancées** 
+- **🔄 Cache Intelligent Multi-Niveau**: MarketDataCache avec TTL automatique et fallbacks
+- **⚙️ Gestion Ressources**: ResourceManager pour isolation CPU et prévention surcharge
+- **🌐 API REST Complète**: 9 endpoints market data avec documentation Swagger
+- **🛡️ SecurityChecker Optimisé**: Analyses parallèles 3x plus rapides avec cache intelligent
+- **📊 Métriques Performance**: Monitoring temps réel avec cache hit rate et statistiques
+
 ## 🏗️ Technical Architecture
 
 ### Backend (FastAPI + Python)
@@ -23,8 +30,12 @@ NumerusX is an advanced AI-powered cryptocurrency trading bot specifically desig
 - **Gemini 2.5 Flash**: AI decision-making engine
 - **Jupiter SDK v6**: DEX integration for Solana
 - **Socket.io**: Real-time communication
-- **SQLite**: Local database storage
+- **SQLite**: Local database storage with WAL optimization
 - **JWT Authentication**: Secure API access
+- **Redis Cache**: High-performance caching layer
+- **MarketDataCache (C16)**: Cache intelligent avec TTL et fallbacks
+- **ResourceManager (C17)**: Isolation CPU/mémoire pour analyses intensives
+- **OptimizedSecurityChecker (C8)**: Analyses parallèles avec cache multi-niveau
 
 ### Frontend (React + TypeScript)
 - **React 18**: Modern component-based UI
@@ -39,21 +50,13 @@ NumerusX is an advanced AI-powered cryptocurrency trading bot specifically desig
 
 ### Infrastructure & DevOps
 - **Docker Compose**: Multi-service orchestration
-- **Redis**: High-performance caching layer
+- **Redis**: High-performance caching layer with TTL management
 - **Development Scripts**: Automated setup and management tools
 - **Environment Management**: Complete .env configuration
-- **API Structure**: RESTful API with 32 endpoints across 7 modules
-
-## 🎨 UI Components & Design System
-
-### Modern Interface with shadcn/ui
-- **Design Style**: New York theme with zinc base color
-- **Components**: 42 shadcn/ui components integrated
-  - Navigation: Sidebar, Navigation Menu, Breadcrumb
-  - Display: Card, Badge, Progress, Chart, Skeleton
-  - Forms: Input, Select, Button, Switch, Slider
-  - Feedback: Alert, Toast (Sonner), Dialog, Sheet
-  - Layout: Aspect Ratio, Separator, Resizable
+- **API Structure**: RESTful API with 41 endpoints across 8 modules
+  - **Market Data API (C5)**: 9 nouveaux endpoints avec auth JWT
+  - **Performance Monitoring**: Métriques temps réel et cache analytics
+  - **Resource Management**: Quotas CPU et isolation des tâches intensives
 
 ### Key Pages
 1. **Dashboard**: Real-time KPIs, portfolio evolution, recent activity
@@ -118,71 +121,6 @@ Consultez [docs/environment-setup.md](./docs/environment-setup.md) pour :
 - Configuration production vs développement
 - Génération de clés sécurisées
 
-## 🎯 Avantages de l'Approche Conteneurisée
-
-### ✅ Simplicité Maximale
-- **Une seule commande** : `./start.sh` et c'est parti !
-- **Aucune installation manuelle** de Python, Node.js, dépendances
-- **Configuration automatique** des fichiers d'environnement
-- **Gestion intelligente** des erreurs et warnings
-
-### ✅ Consistency Garantie
-- **Environnement identique** sur toutes les machines (Windows, macOS, Linux)
-- **Versions figées** des dépendances et services
-- **Isolation complète** des dépendances système
-- **Reproductibilité** parfaite des bugs et tests
-
-### ✅ Développement Efficace
-- **Hot-reload** automatique pour le backend et frontend
-- **Logs centralisés** et structurés
-- **Debug facile** avec Docker logs
-- **Arrêt/redémarrage rapide** des services
-
-### ✅ Production Ready
-- **Même configuration** en dev et production
-- **Monitoring intégré** avec health checks
-- **Scalabilité** facile avec Docker Swarm/Kubernetes
-- **Sécurité** avec isolation des conteneurs
-
-## 📊 API Documentation
-
-### Available Endpoints
-- **GET /api/v1/bot/status** - Bot status and statistics
-- **POST /api/v1/bot/start** - Start the trading bot
-- **POST /api/v1/bot/stop** - Stop the trading bot
-- **GET /api/v1/portfolio/snapshot** - Current portfolio state
-- **GET /api/v1/trades** - Trading history
-- **POST /api/v1/trades/manual** - Execute manual trade
-
-### WebSocket Events
-- `bot_status_update` - Real-time bot status changes
-- `portfolio_update` - Portfolio value updates
-- `new_trade_executed` - Trade execution notifications
-- `ai_decision_update` - AI decision explanations
-- `market_data_update` - Market data updates
-
-## 🔐 Security Features
-
-- **JWT Authentication**: Secure API access with Auth0
-- **Token Validation**: RS256 verification with PyJWKClient
-- **API Rate Limiting**: Built-in request throttling
-- **Secure Headers**: CORS and security headers configured
-- **Environment Isolation**: Separate development/production configs
-
-## 📈 Trading Features
-
-### AI Decision Making
-- Market trend analysis using Gemini 2.5 Flash
-- Risk assessment and position sizing
-- Entry and exit point optimization
-- Portfolio rebalancing strategies
-
-### Jupiter DEX Integration
-- Real-time price fetching
-- Slippage protection
-- Transaction optimization
-- Multi-hop routing support
-
 ## 🧪 Testing
 
 ```bash
@@ -194,17 +132,6 @@ cd numerusx-ui
 npm run test
 ```
 
-## 📦 Deployment
-
-### Production Deployment
-1. Configure production environment variables
-2. Build frontend: `npm run build`
-3. Deploy using Docker: `docker-compose -f docker-compose.prod.yml up`
-
-### Environment Configuration
-- Development: Auto-reload enabled, debug logs
-- Production: Optimized builds, error monitoring
-
 ## 🤝 Contributing
 
 1. Fork the repository
@@ -214,19 +141,6 @@ npm run test
 5. Submit a pull request
 
 ## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For support and questions:
-- Create an issue in the GitHub repository
-- Check the documentation in the `/docs` folder
-- Review the API documentation at `/docs` endpoint
-
----
-
-**⚠️ Disclaimer**: This trading bot is for educational and experimental purposes. Always test thoroughly before using with real funds. Cryptocurrency trading involves significant risk.
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
