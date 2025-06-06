@@ -11,7 +11,8 @@ from . import (
     trades_routes,
     portfolio_routes,
     ai_decisions_routes,
-    system_routes
+    system_routes,
+    market_data_routes
 )
 
 # Main router for API v1
@@ -25,3 +26,4 @@ api_router.include_router(trades_routes.router, prefix="/trades", tags=["Trading
 api_router.include_router(portfolio_routes.router, prefix="/portfolio", tags=["Portfolio"])
 api_router.include_router(ai_decisions_routes.router, prefix="/ai", tags=["AI Decisions"])
 api_router.include_router(system_routes.router, prefix="/system", tags=["System"])
+api_router.include_router(market_data_routes.router, prefix="/market-data", tags=["Market Data"])

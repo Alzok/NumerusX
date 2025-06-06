@@ -107,12 +107,26 @@ class DexBot:
             # This needs to be async if get_total_portfolio_value is async
             # For now, assuming a synchronous way or it's handled in an async setup method
 
+            # Créer MarketDataCache indépendant pour SecurityChecker
+            from app.services.market_data_cache import MarketDataCache
+            self.market_data_cache = MarketDataCache(config=self.config)
+            
             self.security_checker = SecurityChecker(
-                # db_path=self.get_config().database.db_path, # SecurityChecker might not need DB
-                market_data_provider=self.market_data_provider,
-                config=self.config
+                db_path=self.get_config().database.db_path,
+                market_data_cache=self.market_data_cache
             )
             logger.info("SecurityChecker initialized.")
+            
+            # Initialize ResourceManager pour isolation ressources IA (C17)
+            from app.services.resource_manager import ResourceManager, ResourceQuota
+            quota = ResourceQuota(
+                max_cpu_percent=60.0,    # 60% CPU max pour IA
+                max_memory_mb=4096,      # 4GB RAM max
+                max_concurrent_tasks=2,  # 2 tâches IA simultanées max
+                max_queue_size=20        # Queue limitée
+            )
+            self.resource_manager = ResourceManager(self.config, quota)
+            logger.info("ResourceManager initialized for AI isolation.")
             
             self.trade_executor = TradeExecutor(
                 config=self.config,
@@ -192,10 +206,11 @@ class DexBot:
         
         await self._initialize_async_dependencies()
 
-        # Manage contexts for JupiterApiClient, MarketDataProvider, and TradingEngine
+        # Manage contexts for JupiterApiClient, MarketDataProvider, TradingEngine, MarketDataCache, and ResourceManager
         # TradingEngine and MarketDataProvider manage their internal resources if needed,
         # but JupiterApiClient is the primary one with a Solana client connection.
-        async with self.jupiter_client, self.market_data_provider, self.trading_engine:
+        # ResourceManager ensures AI tasks don't overload system (C17)
+        async with self.jupiter_client, self.market_data_provider, self.trading_engine, self.market_data_cache, self.resource_manager:
             self.main_loop_task = asyncio.create_task(self._main_loop())
             try:
                 await self.main_loop_task

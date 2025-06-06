@@ -3,12 +3,13 @@ import logging
 import time
 import asyncio
 import json
+from typing import Dict, Any, List, Optional, Set, Tuple
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import aiohttp
 import sqlite3
 from dataclasses import dataclass
 from app.config import get_config
-from app.market.market_data import MarketDataProvider
+from app.services.market_data_cache import MarketDataCache
 import jwt
 from datetime import datetime, timedelta
 from passlib.context import CryptContext
@@ -82,16 +83,16 @@ class SecurityRisk:
 class SecurityChecker:
     """Classe pour vérifier la sécurité des tokens et des transactions."""
     
-    def __init__(self, db_path: str, market_data_provider: Optional[MarketDataProvider] = None):
+    def __init__(self, db_path: str, market_data_cache: Optional[MarketDataCache] = None):
         """
         Initialise le vérificateur de sécurité.
         
         Args:
             db_path: Chemin vers la base de données SQLite
-            market_data_provider: Fournisseur de données de marché (optionnel)
+            market_data_cache: Cache de données de marché indépendant (optionnel)
         """
         self.db_path = db_path
-        self.market_data = market_data_provider
+        self.market_data = market_data_cache  # Utilise MarketDataCache au lieu de MarketDataCache
         self.conn = self._initialize_database()
         self.blacklist = self._load_blacklist()
         self.suspicious_patterns = self._load_suspicious_patterns()
@@ -285,7 +286,7 @@ class SecurityChecker:
            retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError))) # Keep retry if MDP call might be retried for network issues
     async def _check_token_age_and_history(self, token_address: str) -> List[SecurityRisk]:
         """
-        Vérifie l'âge et l'historique du token en utilisant MarketDataProvider.
+        Vérifie l'âge et l'historique du token en utilisant MarketDataCache.
         
         Args:
             token_address: Adresse du token Solana
@@ -296,11 +297,11 @@ class SecurityChecker:
         risks = []
         try:
             if not self.market_data:
-                logger.warning("MarketDataProvider non disponible dans SecurityChecker pour _check_token_age_and_history.")
+                logger.warning("MarketDataCache non disponible dans SecurityChecker pour _check_token_age_and_history.")
                 risks.append(SecurityRisk(
                     risk_type="config_error",
                     severity=5,
-                    description="MarketDataProvider non configuré pour vérifier l'âge du token.",
+                    description="MarketDataCache non configuré pour vérifier l'âge du token.",
                     metadata={"token_address": token_address}
                 ))
                 return risks
@@ -308,7 +309,7 @@ class SecurityChecker:
             token_info_response = await self.market_data.get_token_info(token_address)
             
             if not token_info_response['success']:
-                error_msg = f"Échec de la récupération des informations du token pour l'âge/historique: {token_info_response.get('error', 'Erreur inconnue de MarketDataProvider')}"
+                error_msg = f"Échec de la récupération des informations du token pour l'âge/historique: {token_info_response.get('error', 'Erreur inconnue de MarketDataCache')}"
                 logger.warning(f"{error_msg} (Token: {token_address})")
                 risks.append(SecurityRisk(
                     risk_type="token_info_unavailable_age_check",
@@ -320,7 +321,7 @@ class SecurityChecker:
 
             token_info_data = token_info_response['data']
             if not token_info_data:
-                logger.warning(f"Aucune donnée d'information de token retournée par MarketDataProvider pour {token_address} lors de la vérification de l'âge.")
+                logger.warning(f"Aucune donnée d'information de token retournée par MarketDataCache pour {token_address} lors de la vérification de l'âge.")
                 risks.append(SecurityRisk(
                     risk_type="empty_token_info_age_check",
                     severity=4,
@@ -329,8 +330,8 @@ class SecurityChecker:
                 ))
                 return risks
 
-            # Vérifier l'âge du token à partir des données de MarketDataProvider
-            # Assumons que MarketDataProvider pourrait fournir 'created_at' ou un champ similaire.
+            # Vérifier l'âge du token à partir des données de MarketDataCache
+            # Assumons que MarketDataCache pourrait fournir 'created_at' ou un champ similaire.
             # Si Jupiter /token-list est utilisé, il n'y a pas de `created_at`. DexScreener non plus directement.
             # Ce champ est donc hypothétique pour l'instant ou nécessite une source dédiée.
             # Pour la démo, nous allons simuler sa présence potentielle ou son absence.
@@ -506,7 +507,7 @@ class SecurityChecker:
     async def _get_onchain_metrics(self, token_address: str) -> List[SecurityRisk]:
         """
         Analyse les métriques on-chain du token, y compris les informations sur le token et la liquidité.
-        Utilise MarketDataProvider pour obtenir les données.
+        Utilise MarketDataCache pour obtenir les données.
         
         Args:
             token_address: Adresse du token Solana
@@ -517,11 +518,11 @@ class SecurityChecker:
         risks = []
         try:
             if not self.market_data:
-                logger.warning("MarketDataProvider non disponible dans SecurityChecker pour _get_onchain_metrics.")
+                logger.warning("MarketDataCache non disponible dans SecurityChecker pour _get_onchain_metrics.")
                 risks.append(SecurityRisk(
                     risk_type="config_error_metrics", # More specific risk type
                     severity=5, # Adjusted severity
-                    description="MarketDataProvider non configuré pour récupérer les métriques on-chain.",
+                    description="MarketDataCache non configuré pour récupérer les métriques on-chain.",
                     metadata={"token_address": token_address}
                 ))
                 return risks # Cannot proceed without market_data
@@ -637,7 +638,7 @@ class SecurityChecker:
 
     async def _detect_rugpull_patterns(self, token_address: str) -> List[SecurityRisk]:
         """
-        Détecte les modèles sophistiqués de rug pull en utilisant les données de MarketDataProvider.
+        Détecte les modèles sophistiqués de rug pull en utilisant les données de MarketDataCache.
         
         Args:
             token_address: Adresse du token Solana
@@ -653,11 +654,11 @@ class SecurityChecker:
 
         try:
             if not self.market_data:
-                logger.warning("MarketDataProvider non disponible pour _detect_rugpull_patterns.")
+                logger.warning("MarketDataCache non disponible pour _detect_rugpull_patterns.")
                 risks.append(SecurityRisk(
                     risk_type="config_error_rugpull", 
                     severity=5,
-                    description="MarketDataProvider non configuré pour la détection de rugpull.",
+                    description="MarketDataCache non configuré pour la détection de rugpull.",
                     metadata={"token_address": token_address}
                 ))
                 return risks
@@ -915,7 +916,7 @@ class SecurityChecker:
     async def _analyze_liquidity_depth(self, token_address: str) -> List[SecurityRisk]:
         """
         Analyse la profondeur de la liquidité pour détecter des manipulations.
-        Utilise MarketDataProvider.get_liquidity_data.
+        Utilise MarketDataCache.get_liquidity_data.
         
         Args:
             token_address: Adresse du token Solana
@@ -926,11 +927,11 @@ class SecurityChecker:
         risks = []
         try:
             if not self.market_data:
-                logger.warning("MarketDataProvider non disponible pour _analyze_liquidity_depth.")
+                logger.warning("MarketDataCache non disponible pour _analyze_liquidity_depth.")
                 risks.append(SecurityRisk(
                     risk_type="config_error_depth_analysis",
                     severity=5,
-                    description="MarketDataProvider non configuré pour l'analyse de profondeur de liquidité.",
+                    description="MarketDataCache non configuré pour l'analyse de profondeur de liquidité.",
                     metadata={"token_address": token_address}
                 ))
                 return risks
@@ -959,7 +960,7 @@ class SecurityChecker:
                 ))
                 return risks
             
-            # MarketDataProvider.get_liquidity_data returns a flat dict primarily from _convert_dexscreener_format.
+            # MarketDataCache.get_liquidity_data returns a flat dict primarily from _convert_dexscreener_format.
             # Actual order book depth ("depth_levels") would typically be in liquidity_data['raw_data'] 
             # if the source (e.g., DexScreener pair) provides it, or from a dedicated order book endpoint.
             # Let's assume the structure might be nested or require specific parsing from raw_data.
@@ -1027,7 +1028,7 @@ class SecurityChecker:
                 
                 # Calculer l'impact de prix pour différentes tailles d'ordres
                 # Ensure sell_orders are sorted by price ascending for price impact calculation
-                # (MarketDataProvider should ideally provide sorted data if it comes from an order book source)
+                # (MarketDataCache should ideally provide sorted data if it comes from an order book source)
                 sorted_sell_orders = sorted([o for o in sell_orders if isinstance(o.get("price"), (int, float))], key=lambda x: float(x["price"])) 
 
                 if sorted_sell_orders:
@@ -1158,34 +1159,34 @@ class SecurityChecker:
             logger.error(f"Erreur lors de l'ajout du token {token_address} à la liste noire: {e}")
 
     async def _get_token_holders(self, token_address: str) -> Dict[str, Any]:
-        """Récupère les détenteurs d'un token en utilisant MarketDataProvider.
+        """Récupère les détenteurs d'un token en utilisant MarketDataCache.
         Args:
             token_address: Adresse du token.
         Returns:
             Dictionnaire structuré: {'success': bool, 'error': str|None, 'data': dict_with_holders_or_None}
         """
         if not self.market_data:
-            logger.error("MarketDataProvider non initialisé dans SecurityChecker pour _get_token_holders.")
-            return {'success': False, 'error': "MarketDataProvider not available", 'data': None}
+            logger.error("MarketDataCache non initialisé dans SecurityChecker pour _get_token_holders.")
+            return {'success': False, 'error': "MarketDataCache not available", 'data': None}
 
         logger.debug(f"SecurityChecker: Appel de market_data.get_token_holders pour {token_address}")
         response = await self.market_data.get_token_holders(token_address=token_address, limit=get_config().SECURITY_MAX_HOLDERS_TO_FETCH) # Using a config value for limit
         
         if not response['success']:
-            logger.warning(f"Échec de la récupération des détenteurs de token via MarketDataProvider pour {token_address}: {response['error']}")
+            logger.warning(f"Échec de la récupération des détenteurs de token via MarketDataCache pour {token_address}: {response['error']}")
             # Propagate the structured error
             return response
             
-        # response['data'] should be like {"holders": [...]} as per MarketDataProvider spec
+        # response['data'] should be like {"holders": [...]} as per MarketDataCache spec
         if response['data'] is None or "holders" not in response['data']:
-            logger.warning(f"Données de détenteurs de token inattendues ou vides de MarketDataProvider pour {token_address}: {response['data']}")
-            return {'success': False, 'error': "Invalid or empty holder data from MarketDataProvider", 'data': response['data']}
+            logger.warning(f"Données de détenteurs de token inattendues ou vides de MarketDataCache pour {token_address}: {response['data']}")
+            return {'success': False, 'error': "Invalid or empty holder data from MarketDataCache", 'data': response['data']}
 
         return {'success': True, 'error': None, 'data': response['data']}
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError))) # Keep retry for underlying MDP resilience
     async def _get_recent_transactions(self, token_address: str, limit: int = 100) -> Dict[str, Any]:
-        """Récupère les transactions récentes pour un token via MarketDataProvider.
+        """Récupère les transactions récentes pour un token via MarketDataCache.
         Args:
             token_address: Adresse du token.
             limit: Nombre de transactions à retourner.
@@ -1193,26 +1194,26 @@ class SecurityChecker:
             Dictionnaire structuré: {'success': bool, 'error': str|None, 'data': list_of_transactions_or_None}
         """
         if not self.market_data:
-            logger.error("MarketDataProvider non initialisé dans SecurityChecker pour _get_recent_transactions.")
-            return {'success': False, 'error': "MarketDataProvider not available", 'data': None}
+            logger.error("MarketDataCache non initialisé dans SecurityChecker pour _get_recent_transactions.")
+            return {'success': False, 'error': "MarketDataCache not available", 'data': None}
 
         logger.debug(f"SecurityChecker: Appel de market_data.get_token_transactions pour {token_address}, limit {limit}")
         response = await self.market_data.get_token_transactions(token_address=token_address, limit=limit)
 
         if not response['success']:
-            logger.warning(f"Échec de la récupération des transactions de token via MarketDataProvider pour {token_address}: {response['error']}")
+            logger.warning(f"Échec de la récupération des transactions de token via MarketDataCache pour {token_address}: {response['error']}")
             return response # Propagate structured error
 
         # response['data'] should be a list of transactions
         if response['data'] is None or not isinstance(response['data'], list):
-            logger.warning(f"Données de transactions de token inattendues ou invalides de MarketDataProvider pour {token_address}: {response['data']}")
-            return {'success': False, 'error': "Invalid or empty transaction data from MarketDataProvider", 'data': response['data']}
+            logger.warning(f"Données de transactions de token inattendues ou invalides de MarketDataCache pour {token_address}: {response['data']}")
+            return {'success': False, 'error': "Invalid or empty transaction data from MarketDataCache", 'data': response['data']}
 
         return {'success': True, 'error': None, 'data': response['data']}
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10), retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError))) # Keep retry for underlying MDP resilience
     async def _get_liquidity_history(self, token_address: str, timeframe: str = "15m", limit: int = 96) -> Dict[str, Any]:
-        """Récupère l'historique de liquidité pour un token via MarketDataProvider.
+        """Récupère l'historique de liquidité pour un token via MarketDataCache.
         Args:
             token_address: Adresse du token.
             timeframe: Intervalle de temps.
@@ -1221,20 +1222,20 @@ class SecurityChecker:
             Dictionnaire structuré: {'success': bool, 'error': str|None, 'data': list_of_liquidity_points_or_None}
         """
         if not self.market_data:
-            logger.error("MarketDataProvider non initialisé dans SecurityChecker pour _get_liquidity_history.")
-            return {'success': False, 'error': "MarketDataProvider not available", 'data': None}
+            logger.error("MarketDataCache non initialisé dans SecurityChecker pour _get_liquidity_history.")
+            return {'success': False, 'error': "MarketDataCache not available", 'data': None}
 
         logger.debug(f"SecurityChecker: Appel de market_data.get_liquidity_history pour {token_address}, timeframe {timeframe}, limit {limit}")
         response = await self.market_data.get_liquidity_history(token_address=token_address, timeframe=timeframe, limit=limit)
         
         if not response['success']:
-            logger.warning(f"Échec de la récupération de l'historique de liquidité via MarketDataProvider pour {token_address}: {response['error']}")
+            logger.warning(f"Échec de la récupération de l'historique de liquidité via MarketDataCache pour {token_address}: {response['error']}")
             return response # Propagate structured error
 
         # response['data'] should be a list of liquidity data points
         if response['data'] is None or not isinstance(response['data'], list):
-            logger.warning(f"Données d'historique de liquidité inattendues ou invalides de MarketDataProvider pour {token_address}: {response['data']}")
-            return {'success': False, 'error': "Invalid or empty liquidity history data from MarketDataProvider", 'data': response['data']}
+            logger.warning(f"Données d'historique de liquidité inattendues ou invalides de MarketDataCache pour {token_address}: {response['data']}")
+            return {'success': False, 'error': "Invalid or empty liquidity history data from MarketDataCache", 'data': response['data']}
             
         return {'success': True, 'error': None, 'data': response['data']}
 
