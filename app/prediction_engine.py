@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import json
 import os
-from typing import Dict, Any, List, Tuple, Optional, Union
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import asyncio
@@ -14,10 +13,6 @@ from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 import joblib
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')

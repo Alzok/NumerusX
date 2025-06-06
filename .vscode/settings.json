@@ -1,0 +1,41 @@
+{
+  // Configuration Python pour projet Docker
+  "python.defaultInterpreterPath": "/usr/local/bin/python",
+  "python.linting.enabled": false,
+  "python.analysis.typeCheckingMode": "off",
+  "python.analysis.autoImportCompletions": false,
+  
+  // Pylance - Désactiver les erreurs pour les imports manquants (ils sont dans Docker)
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingImports": "none",
+    "reportMissingModuleSource": "none", 
+    "reportUndefinedVariable": "none",
+    "reportInvalidTypeForm": "none"
+  },
+  
+  // Extensions recommandées pour Docker
+  "recommendations": [
+    "ms-vscode-remote.remote-containers",
+    "ms-azuretools.vscode-docker"
+  ],
+  
+  // Configuration TypeScript pour le frontend
+  "typescript.preferences.importModuleSpecifier": "relative",
+  "typescript.suggest.autoImports": true,
+  
+  // Configuration pour les fichiers
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/.git": true,
+    "**/.*": false
+  },
+  
+  // Configuration pour Docker Compose
+  "docker-compose.projectName": "numerusx",
+  
+  // Configuration pour l'auto-sauvegarde
+  "files.autoSave": "afterDelay",
+  "files.autoSaveDelay": 1000
+} 

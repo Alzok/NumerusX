@@ -4,7 +4,7 @@ import json # Added for logging and example
 import time # Added for example
 import asyncio # Added for async decide_trade
 
-from app.config import Config
+from app.config_v2 import get_config
 # Placeholder for other necessary imports, e.g., data providers, engines
 # from app.market.market_data import MarketDataProvider
 # from app.prediction_engine import PredictionEngine
@@ -100,7 +100,7 @@ class AIAgent:
 
         try:
             prompt_for_gemini = self._construct_gemini_prompt(aggregated_inputs_model)
-            if self.config.DEBUG_PROMPTS: # Instruction 5 from review
+            if self.get_config().app.debug_PROMPTS: # Instruction 5 from review
                 logger.debug(f"Full prompt for Gemini:\\n{prompt_for_gemini}")
             elif len(prompt_for_gemini) > 2000 : # Log snippet if too long and not debug
                  logger.debug(f"Prompt for Gemini (snippet):\n{prompt_for_gemini[:1000]}\\n...\\n{prompt_for_gemini[-1000:]}")
@@ -284,7 +284,7 @@ async def main_test_agent():
             self.LOG_MAX_MSG_LENGTH = 2048
 
 
-    mock_config = MockConfig()
+    mock_config = Mockget_config()
     ai_agent = AIAgent(config=mock_config)
 
     # Construct a sample AggregatedInputs object for testing
@@ -354,7 +354,7 @@ if __name__ == "__main__":
 
     # Example of how an encrypted value from config might be used by the agent if needed
     # (though API keys are usually used by data providers, not directly by the agent core logic)
-    # if mock_config.JUPITER_API_KEY:
-    #     logger.info(f"Agent has access to JUPITER_API_KEY (example): {mock_config.JUPITER_API_KEY[:5]}...")
+    # if mock_get_config().jupiter.api_key:
+    #     logger.info(f"Agent has access to JUPITER_API_KEY (example): {mock_get_config().jupiter.api_key[:5]}...")
     # else:
     #     logger.warning("JUPITER_API_KEY not available to agent in this example.") 

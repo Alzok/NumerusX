@@ -1,9 +1,8 @@
 import jwt
-from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, SecurityScopes
 from typing import Optional
 
-from app.config import Config
+from app.config_v2 import get_config
 from app.utils.exceptions import NumerusXBaseError # Assuming you have custom exceptions
 
 class AuthError(NumerusXBaseError):
@@ -26,10 +25,10 @@ token_auth_scheme = HTTPBearer()
 class VerifyToken:
     """Does all the token verification using PyJWT."""
     def __init__(self):
-        self.jwks_uri = Config.AUTH_PROVIDER_JWKS_URI
-        self.audience = Config.AUTH_PROVIDER_AUDIENCE
-        self.issuer = Config.AUTH_PROVIDER_ISSUER
-        self.algorithms = [Config.AUTH_PROVIDER_ALGORITHMS]
+        self.jwks_uri = get_config().AUTH_PROVIDER_JWKS_URI
+        self.audience = get_config().AUTH_PROVIDER_AUDIENCE
+        self.issuer = get_config().AUTH_PROVIDER_ISSUER
+        self.algorithms = [get_config().AUTH_PROVIDER_ALGORITHMS]
 
         if not all([self.jwks_uri, self.audience, self.issuer]):
             # This is a server configuration error, should ideally prevent startup

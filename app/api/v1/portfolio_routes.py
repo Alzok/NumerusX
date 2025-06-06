@@ -5,7 +5,6 @@ Handles portfolio information, balances, and performance.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from typing import List, Dict, Any
 from datetime import datetime, timedelta
 import logging
 

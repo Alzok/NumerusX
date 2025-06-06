@@ -4,7 +4,7 @@ from app.strategies.momentum_strategy import MomentumStrategy
 from app.strategies.mean_reversion_strategy import MeanReversionStrategy
 from app.strategies.trend_following_strategy import TrendFollowingStrategy
 from app.analytics_engine import AdvancedTradingStrategy # This is also a BaseStrategy
-from app.config import Config
+from app.config_v2 import get_config
 import logging
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ class StrategySelector:
             TrendFollowingStrategy().get_name(): TrendFollowingStrategy,
             # Add other strategies here as they are created
         }
-        self.default_strategy_name = Config.DEFAULT_STRATEGY_NAME
+        self.default_strategy_name = get_config().DEFAULT_STRATEGY_NAME
         self.logger = logger
 
         if self.default_strategy_name not in self.strategies:

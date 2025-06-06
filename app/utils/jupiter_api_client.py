@@ -11,7 +11,7 @@ from solders.transaction import VersionedTransaction
 
 from solana.rpc.async_api import AsyncClient
 # Import Config using alias to avoid naming conflicts with solders.rpc.config
-from app.config import Config as AppConfig
+from app.config_v2 import get_config as AppConfig
 
 # Assuming jupiter_python_sdk is installed and its structure is as expected.
 # These imports might need adjustment based on the actual SDK structure.
@@ -35,12 +35,11 @@ class Jupiter:
     async def swap(self, *args, **kwargs):
         raise JupiterAPIError("Jupiter SDK not available - stub implementation")
 
-from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type, AsyncRetrying, RetryError
 
 import logging
 
 # Import custom exceptions
-from .exceptions import (
+from app.utils.exceptions import (
     JupiterAPIError, SolanaTransactionError, TransactionExpiredError, 
     TransactionBroadcastError, TransactionConfirmationError
 )
@@ -94,14 +93,14 @@ class JupiterApiClient:
         # The exact parameter names (quote_api_url, swap_api_url, etc.) depend on the SDK's Jupiter class.
         
         # Default to lite API hostname
-        jup_hostname = self.config.JUPITER_LITE_API_HOSTNAME
+        jup_hostname = self.get_config().jupiter.lite_api_hostname
         # Potentially switch to PRO_API_HOSTNAME if an API key is present and config allows
-        if self.config.JUPITER_API_KEY and self.config.JUPITER_PRO_API_HOSTNAME:
+        if self.get_config().jupiter.api_key and self.get_config().jupiter.pro_api_hostname:
              # This logic might be more complex: e.g., a separate config flag to use Pro API
             logger.info("Jupiter Pro API Key found, considering Pro Hostname. Ensure config directs usage.")
             # For now, let's assume a direct switch if a key is present for Pro hostname,
             # but typically an explicit setting to USE_PRO_API would be better.
-            # jup_hostname = self.config.JUPITER_PRO_API_HOSTNAME # Uncomment if Pro API is to be used
+            # jup_hostname = self.get_config().jupiter.pro_api_hostname # Uncomment if Pro API is to be used
 
         # try:
         #     self.jupiter = Jupiter(
@@ -117,7 +116,7 @@ class JupiterApiClient:
         #         trigger_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_TRIGGER_API_PATH.rstrip('/')}",
         #         recurring_api_url=f"{jup_hostname.rstrip('/')}{self.config.JUPITER_RECURRING_API_PATH.rstrip('/')}",
         #         # The SDK might also take an api_key parameter if using the pro version
-        #         api_key=self.config.JUPITER_API_KEY if jup_hostname == self.config.JUPITER_PRO_API_HOSTNAME else None
+        #         api_key=self.get_config().jupiter.api_key if jup_hostname == self.get_config().jupiter.pro_api_hostname else None
         #     )
         #     # If DCA or Trigger modules are separate in the SDK and need their own init:
         #     # self.jupiter_trigger = JupiterTrigger(...)
@@ -197,7 +196,7 @@ class JupiterApiClient:
             "input_mint": input_mint,
             "output_mint": output_mint,
             "amount": amount_lamports,
-            "slippage_bps": slippage_bps if slippage_bps is not None else self.config.JUPITER_DEFAULT_SLIPPAGE_BPS,
+            "slippage_bps": slippage_bps if slippage_bps is not None else self.get_config().jupiter.default_slippage_bps,
             "only_direct_routes": self.config.JUPITER_ONLY_DIRECT_ROUTES,
             "swap_mode": swap_mode if swap_mode else self.config.JUPITER_SWAP_MODE,
             "as_legacy_transaction": False, # Prefer VersionedTransactions
@@ -526,14 +525,14 @@ class JupiterApiClient:
 # Example usage (for testing or direct script execution):
 # async def main():
 #     # Load config (ensure your .env has MASTER_ENCRYPTION_KEY, SOLANA_PRIVATE_KEY_BS58, SOLANA_RPC_URL)
-#     app_config = Config()
-#     if not app_config.SOLANA_PRIVATE_KEY_BS58 or not app_config.SOLANA_RPC_URL:
+#     app_config = get_config()
+#     if not app_get_config().solana.private_key_bs58 or not app_get_config().solana.rpc_url:
 #         print("SOLANA_PRIVATE_KEY_BS58 and SOLANA_RPC_URL must be set in config (via .env or directly).")
 #         return
 
 #     jupiter_client = JupiterApiClient(
-#         private_key_bs58=app_config.SOLANA_PRIVATE_KEY_BS58,
-#         rpc_url=app_config.SOLANA_RPC_URL,
+#         private_key_bs58=app_get_config().solana.private_key_bs58,
+#         rpc_url=app_get_config().solana.rpc_url,
 #         config=app_config
 #     )
 

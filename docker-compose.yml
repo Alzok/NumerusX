@@ -1,4 +1,31 @@
 services:
+  # Redis - Démarrage en premier
+  redis:
+    image: redis:7-alpine
+    container_name: numerusx-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --save 60 1
+      --save 300 10
+      --save 900 100
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - numerusx-network
+
+  # Backend - Démarre après Redis
   backend:
     build:
       context: .
@@ -8,32 +35,34 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./app:/app/app
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./keys:/app/keys
-      - ./models:/app/models
+      - ./app:/code/app
+      - ./data:/code/data
+      - ./logs:/code/logs
+      - ./keys:/code/keys
+      - ./models:/code/models
       # Mount .env file directly for backend to use
-      - ./.env:/app/.env 
+      - ./.env:/code/.env 
     env_file:
       - ./.env
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_URL=redis://redis:6379
+      - PYTHONPATH=/code
     depends_on:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/system/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     networks:
       - numerusx-network
     # Command is defined in Dockerfile, but can be overridden here if needed
     # command: uvicorn app.main:final_asgi_app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app
 
+  # Frontend - Démarre après Backend
   frontend:
     build:
       context: .
@@ -53,67 +82,19 @@ services:
       - ./numerusx-ui/.env:/app/numerusx-ui/.env
     environment:
       - NODE_ENV=development
-      - VITE_API_URL=http://backend:8000
-      - VITE_WS_URL=ws://backend:8000
+      - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5173"]
-      interval: 30s
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5173"]
+      interval: 15s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 45s
     networks:
       - numerusx-network
-
-  redis:
-    image: redis:7-alpine
-    container_name: numerusx-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    command: >
-      redis-server
-      --save 60 1
-      --save 300 10
-      --save 900 100
-      --loglevel warning
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    networks:
-      - numerusx-network
-
-  # Optional: Add nginx for production
-  # nginx:
-  #   image: nginx:alpine
-  #   container_name: numerusx-nginx
-  #   restart: unless-stopped
-  #   ports:
-  #     - "80:80"
-  #     - "443:443"
-  #   volumes:
-  #     - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-  #     - ./nginx/ssl:/etc/nginx/ssl:ro
-  #     - ../numerusx-ui/dist:/usr/share/nginx/html:ro
-  #   depends_on:
-  #     - backend
-  #     - frontend
-  #   healthcheck:
-  #     test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #   networks:
-  #     - numerusx-network
 
 volumes:
   redis_data:

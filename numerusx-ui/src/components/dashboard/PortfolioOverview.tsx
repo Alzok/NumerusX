@@ -16,6 +16,9 @@ interface PortfolioMetric {
   progress?: number;
 }
 
+// Types pour les données de graphique
+
+
 export const PortfolioOverview: React.FC = () => {
   const { data: portfolio, isLoading } = usePortfolio();
 
@@ -154,11 +157,11 @@ export const PortfolioOverview: React.FC = () => {
                 <Chart
                   type="line"
                   data={{
-                    labels: chartData.map(d => d.time),
+                    labels: chartData.map((d: any) => d.time),
                     datasets: [
                       {
                         label: 'Valeur Portfolio',
-                        data: chartData.map(d => d.value),
+                        data: chartData.map((d: any) => d.value),
                         borderColor: 'rgb(234, 179, 8)',
                         backgroundColor: 'rgba(234, 179, 8, 0.1)',
                         tension: 0.4,
@@ -173,7 +176,7 @@ export const PortfolioOverview: React.FC = () => {
                       y: {
                         beginAtZero: false,
                         ticks: {
-                          callback: function(value) {
+                          callback: function(value: any) {
                             return '$' + value.toLocaleString();
                           },
                         },
@@ -185,7 +188,7 @@ export const PortfolioOverview: React.FC = () => {
                       },
                       tooltip: {
                         callbacks: {
-                          label: function(context) {
+                          label: function(context: any) {
                             return '$' + context.parsed.y.toLocaleString();
                           },
                         },
@@ -224,7 +227,7 @@ export const PortfolioOverview: React.FC = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {allocationData.map((asset, index) => (
+            {allocationData.map((asset: any, index: number) => (
               <div key={index} className="space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">

@@ -5,7 +5,7 @@ from solana.keypair import Keypair
 from solana.publickey import PublicKey
 from solana.rpc.api import Client
 from solana.rpc.types import TokenAccountOpts
-from app.config import Config
+from app.config_v2 import get_config
 
 class SolanaWallet:
     def __init__(self, private_key: Optional[str] = None):
@@ -16,7 +16,7 @@ class SolanaWallet:
             private_key: Clé privée au format base58 (optionnel)
         """
         self.logger = logging.getLogger("wallet")
-        self.client = Client(Config.SOLANA_RPC_URL)
+        self.client = Client(get_config().solana.rpc_url)
         
         if private_key:
             self.keypair = Keypair.from_secret_key(base58.b58decode(private_key))

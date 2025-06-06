@@ -2,12 +2,8 @@ import logging
 import time
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List, Tuple, Optional, Union, Callable, Type
 from dataclasses import dataclass
 from enum import Enum
-import asyncio
-import json
-import os
 from abc import ABC, abstractmethod
 
 # Configuration du logging
@@ -1206,7 +1202,6 @@ class BacktestEngine:
         """
         try:
             import matplotlib.pyplot as plt
-            from matplotlib.dates import date2num
             import datetime
             
             if not self.equity_curve:

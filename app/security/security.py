@@ -3,13 +3,11 @@ import logging
 import time
 import asyncio
 import json
-from typing import Dict, Any, Optional, List, Union, Tuple, Set
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import aiohttp
 import sqlite3
 from dataclasses import dataclass
-import numpy as np
-from app.config import Config
+from app.config_v2 import get_config
 from app.market.market_data import MarketDataProvider
 import jwt
 from datetime import datetime, timedelta
@@ -30,9 +28,9 @@ class Security:
     """Handles API authentication (JWT) and password management."""
 
     def __init__(self):
-        self.secret_key = Config.JWT_SECRET_KEY
+        self.secret_key = get_config().security.jwt_secret_key
         self.algorithm = "HS256" # Standard algorithm for JWT
-        self.expiration_seconds = Config.JWT_EXPIRATION
+        self.expiration_seconds = get_config().security.jwt_expiration
 
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verifies a plain password against a hashed one."""
@@ -458,14 +456,14 @@ class SecurityChecker:
                         # Ensure percentage is a float or int before comparison
                         if not isinstance(largest_percentage, (float, int)):
                             logger.warning(f"Largest holder percentage is not a number for {token_address}: {largest_percentage}. Skipping concentration check.")
-                        elif largest_percentage > Config.HOLDER_CONCENTRATION_THRESHOLD_HIGH: # Use Config value
+                        elif largest_percentage > get_config().HOLDER_CONCENTRATION_THRESHOLD_HIGH: # Use Config value
                             risks.append(SecurityRisk(
                                 risk_type="high_concentration",
                                 severity=8,
                                 description=f"Un seul détenteur non vérifié possède {largest_percentage*100:.1f}% des tokens",
                                 metadata={"holder_address": largest_holder.get("address"), "percentage": largest_percentage}
                             ))
-                        elif largest_percentage > Config.HOLDER_CONCENTRATION_THRESHOLD_MEDIUM: # Use Config value
+                        elif largest_percentage > get_config().HOLDER_CONCENTRATION_THRESHOLD_MEDIUM: # Use Config value
                             risks.append(SecurityRisk(
                                 risk_type="medium_concentration",
                                 severity=5,
@@ -479,11 +477,11 @@ class SecurityChecker:
                 
                 # Calculer le nombre de détenteurs
                 holder_count = len(holders) # Total holders including verified/unverified, valid/invalid entries filtered above might differ
-                if holder_count < Config.MIN_HOLDERS_COUNT_THRESHOLD: # Use Config value
+                if holder_count < get_config().MIN_HOLDERS_COUNT_THRESHOLD: # Use Config value
                     risks.append(SecurityRisk(
                         risk_type="few_holders",
                         severity=6,
-                        description=f"Le token n'a que {holder_count} détenteurs (Seuil: {Config.MIN_HOLDERS_COUNT_THRESHOLD})",
+                        description=f"Le token n'a que {holder_count} détenteurs (Seuil: {get_config().MIN_HOLDERS_COUNT_THRESHOLD})",
                         metadata={"holder_count": holder_count}
                     ))
             else: # Case where holders list was initially empty
@@ -598,19 +596,19 @@ class SecurityChecker:
 
                     logger.info(f"Liquidité pour {token_address} (métriques on-chain): ${usd_liquidity:.2f} USD")
 
-                    if usd_liquidity < Config.MIN_LIQUIDITY_THRESHOLD_ERROR:
+                    if usd_liquidity < get_config().MIN_LIQUIDITY_THRESHOLD_ERROR:
                         risks.append(SecurityRisk(
                             risk_type="critically_low_liquidity_metrics",
                             severity=9,
-                            description=f"Liquidité critique (métriques): ${usd_liquidity:.2f} USD (Seuil: ${Config.MIN_LIQUIDITY_THRESHOLD_ERROR}).",
-                            metadata={"liquidity_usd": usd_liquidity, "threshold": Config.MIN_LIQUIDITY_THRESHOLD_ERROR}
+                            description=f"Liquidité critique (métriques): ${usd_liquidity:.2f} USD (Seuil: ${get_config().MIN_LIQUIDITY_THRESHOLD_ERROR}).",
+                            metadata={"liquidity_usd": usd_liquidity, "threshold": get_config().MIN_LIQUIDITY_THRESHOLD_ERROR}
                         ))
-                    elif usd_liquidity < Config.MIN_LIQUIDITY_THRESHOLD_WARNING:
+                    elif usd_liquidity < get_config().MIN_LIQUIDITY_THRESHOLD_WARNING:
                         risks.append(SecurityRisk(
                             risk_type="low_liquidity_warning_metrics",
                             severity=6,
-                            description=f"Faible liquidité (métriques): ${usd_liquidity:.2f} USD (Seuil avertissement: ${Config.MIN_LIQUIDITY_THRESHOLD_WARNING}).",
-                            metadata={"liquidity_usd": usd_liquidity, "threshold": Config.MIN_LIQUIDITY_THRESHOLD_WARNING}
+                            description=f"Faible liquidité (métriques): ${usd_liquidity:.2f} USD (Seuil avertissement: ${get_config().MIN_LIQUIDITY_THRESHOLD_WARNING}).",
+                            metadata={"liquidity_usd": usd_liquidity, "threshold": get_config().MIN_LIQUIDITY_THRESHOLD_WARNING}
                         ))
                     
                     # TODO: Further liquidity depth analysis if data is available and structured for it.
@@ -666,7 +664,7 @@ class SecurityChecker:
                 
             # 1. Obtenir l'historique des prix
             # get_historical_prices from MDP already returns structured response
-            price_response = await self.market_data.get_historical_prices(token_address, timeframe=Config.RUGPULL_PRICE_TIMEFRAME, limit=Config.RUGPULL_PRICE_LIMIT)
+            price_response = await self.market_data.get_historical_prices(token_address, timeframe=get_config().RUGPULL_PRICE_TIMEFRAME, limit=get_config().RUGPULL_PRICE_LIMIT)
             if price_response['success'] and price_response['data'] is not None:
                 price_history_data = price_response['data']
             else:
@@ -680,7 +678,7 @@ class SecurityChecker:
                 ))
 
             # 2. Obtenir les transactions récentes
-            transaction_response = await self._get_recent_transactions(token_address, limit=Config.RUGPULL_TRANSACTION_LIMIT)
+            transaction_response = await self._get_recent_transactions(token_address, limit=get_config().RUGPULL_TRANSACTION_LIMIT)
             if transaction_response['success'] and transaction_response['data'] is not None:
                 transaction_history_data = transaction_response['data']
             else:
@@ -694,7 +692,7 @@ class SecurityChecker:
                 ))
 
             # 3. Obtenir l'historique de liquidité
-            liquidity_hist_response = await self._get_liquidity_history(token_address, timeframe=Config.RUGPULL_LIQUIDITY_TIMEFRAME, limit=Config.RUGPULL_LIQUIDITY_LIMIT)
+            liquidity_hist_response = await self._get_liquidity_history(token_address, timeframe=get_config().RUGPULL_LIQUIDITY_TIMEFRAME, limit=get_config().RUGPULL_LIQUIDITY_LIMIT)
             if liquidity_hist_response['success'] and liquidity_hist_response['data'] is not None:
                 liquidity_history_data = liquidity_hist_response['data']
             else:
@@ -708,7 +706,7 @@ class SecurityChecker:
                 ))
             
             # 4. Obtenir les détenteurs de tokens (pour l'analyse du comportement des gros portefeuilles)
-            # Note: Config.SECURITY_MAX_HOLDERS_TO_FETCH est utilisé par _get_token_holders
+            # Note: get_config().SECURITY_MAX_HOLDERS_TO_FETCH est utilisé par _get_token_holders
             # Cela peut être un appel coûteux, à utiliser judicieusement.
             token_holders_response = await self._get_token_holders(token_address) # _get_token_holders gère sa propre limite via Config
             token_holders_data: Optional[Dict[str, Any]] = None
@@ -745,12 +743,12 @@ class SecurityChecker:
                 
                 if price_changes:
                     max_drop = min(price_changes) # min will find the largest negative change
-                    if max_drop < Config.RUGPULL_PRICE_DROP_THRESHOLD:  # e.g., -0.5 for 50% drop
+                    if max_drop < get_config().RUGPULL_PRICE_DROP_THRESHOLD:  # e.g., -0.5 for 50% drop
                         risks.append(SecurityRisk(
                             risk_type="significant_price_drop", # More specific
                             severity=8,
-                            description=f"Chute de prix brutale détectée: {max_drop*100:.1f}% en {Config.RUGPULL_PRICE_TIMEFRAME} intervalle.",
-                            metadata={"max_drop_percentage": max_drop, "timeframe": Config.RUGPULL_PRICE_TIMEFRAME}
+                            description=f"Chute de prix brutale détectée: {max_drop*100:.1f}% en {get_config().RUGPULL_PRICE_TIMEFRAME} intervalle.",
+                            metadata={"max_drop_percentage": max_drop, "timeframe": get_config().RUGPULL_PRICE_TIMEFRAME}
                         ))
             elif not price_history_data and not data_fetch_errors: # Data fetch was successful but list is empty/too short
                  logger.info(f"Historique des prix pour {token_address} est vide ou insuffisant pour l'analyse de chute de prix.")
@@ -779,12 +777,12 @@ class SecurityChecker:
                     # For simplicity, checking overall min drop in the fetched history for now.
                     # More sophisticated: analyze drops in rolling windows or specifically recent ones.
                     largest_drop = min(recent_liquidity_changes) # min will find the largest negative change
-                    if largest_drop < Config.RUGPULL_LIQUIDITY_DROP_THRESHOLD:  # e.g., -0.3 for 30% drop
+                    if largest_drop < get_config().RUGPULL_LIQUIDITY_DROP_THRESHOLD:  # e.g., -0.3 for 30% drop
                         risks.append(SecurityRisk(
                             risk_type="significant_liquidity_drop", # More specific
                             severity=9,
-                            description=f"Retrait important de liquidité détecté: {largest_drop*100:.1f}% en {Config.RUGPULL_LIQUIDITY_TIMEFRAME} intervalle.",
-                            metadata={"liquidity_drop_percentage": largest_drop, "timeframe": Config.RUGPULL_LIQUIDITY_TIMEFRAME}
+                            description=f"Retrait important de liquidité détecté: {largest_drop*100:.1f}% en {get_config().RUGPULL_LIQUIDITY_TIMEFRAME} intervalle.",
+                            metadata={"liquidity_drop_percentage": largest_drop, "timeframe": get_config().RUGPULL_LIQUIDITY_TIMEFRAME}
                         ))
             elif not liquidity_history_data and not data_fetch_errors:
                 logger.info(f"Historique de liquidité pour {token_address} est vide ou insuffisant pour l'analyse de retrait.")
@@ -1010,14 +1008,14 @@ class SecurityChecker:
                 if total_volume > 0:
                     asymmetry_ratio = abs(buy_volume - sell_volume) / total_volume
                     
-                    if asymmetry_ratio > Config.LIQUIDITY_ASYMMETRY_THRESHOLD_SEVERE: # Use Config
+                    if asymmetry_ratio > get_config().LIQUIDITY_ASYMMETRY_THRESHOLD_SEVERE: # Use Config
                         risks.append(SecurityRisk(
                             risk_type="severe_liquidity_asymmetry",
                             severity=8,
                             description=f"Asymétrie sévère de la liquidité: {asymmetry_ratio*100:.1f}%",
                             metadata={"asymmetry_ratio": asymmetry_ratio, "buy_volume_usd": buy_volume, "sell_volume_usd": sell_volume}
                         ))
-                    elif asymmetry_ratio > Config.LIQUIDITY_ASYMMETRY_THRESHOLD_MODERATE: # Use Config
+                    elif asymmetry_ratio > get_config().LIQUIDITY_ASYMMETRY_THRESHOLD_MODERATE: # Use Config
                         risks.append(SecurityRisk(
                             risk_type="moderate_liquidity_asymmetry",
                             severity=5,
@@ -1033,22 +1031,22 @@ class SecurityChecker:
                 sorted_sell_orders = sorted([o for o in sell_orders if isinstance(o.get("price"), (int, float))], key=lambda x: float(x["price"])) 
 
                 if sorted_sell_orders:
-                    price_impact_1k = self._calculate_price_impact(sorted_sell_orders, Config.PRICE_IMPACT_USD_AMOUNT_1K)
-                    if price_impact_1k > Config.PRICE_IMPACT_THRESHOLD_HIGH_1K: 
+                    price_impact_1k = self._calculate_price_impact(sorted_sell_orders, get_config().PRICE_IMPACT_USD_AMOUNT_1K)
+                    if price_impact_1k > get_config().PRICE_IMPACT_THRESHOLD_HIGH_1K: 
                         risks.append(SecurityRisk(
                             risk_type="high_price_impact_1k",
                             severity=6,
-                            description=f"Impact de prix élevé pour {Config.PRICE_IMPACT_USD_AMOUNT_1K} USD: {price_impact_1k*100:.2f}%",
-                            metadata={"price_impact_usd": Config.PRICE_IMPACT_USD_AMOUNT_1K, "impact_percentage": price_impact_1k}
+                            description=f"Impact de prix élevé pour {get_config().PRICE_IMPACT_USD_AMOUNT_1K} USD: {price_impact_1k*100:.2f}%",
+                            metadata={"price_impact_usd": get_config().PRICE_IMPACT_USD_AMOUNT_1K, "impact_percentage": price_impact_1k}
                         ))
                     
-                    price_impact_10k = self._calculate_price_impact(sorted_sell_orders, Config.PRICE_IMPACT_USD_AMOUNT_10K)
-                    if price_impact_10k > Config.PRICE_IMPACT_THRESHOLD_HIGH_10K:
+                    price_impact_10k = self._calculate_price_impact(sorted_sell_orders, get_config().PRICE_IMPACT_USD_AMOUNT_10K)
+                    if price_impact_10k > get_config().PRICE_IMPACT_THRESHOLD_HIGH_10K:
                         risks.append(SecurityRisk(
                             risk_type="high_price_impact_10k",
                             severity=7,
-                            description=f"Impact de prix élevé pour {Config.PRICE_IMPACT_USD_AMOUNT_10K} USD: {price_impact_10k*100:.2f}%",
-                            metadata={"price_impact_usd": Config.PRICE_IMPACT_USD_AMOUNT_10K, "impact_percentage": price_impact_10k}
+                            description=f"Impact de prix élevé pour {get_config().PRICE_IMPACT_USD_AMOUNT_10K} USD: {price_impact_10k*100:.2f}%",
+                            metadata={"price_impact_usd": get_config().PRICE_IMPACT_USD_AMOUNT_10K, "impact_percentage": price_impact_10k}
                         ))
                 else:
                     logger.info(f"Aucun ordre de vente ('sell_orders') trouvé ou valide pour {token_address} pour l'analyse d'impact de prix.")
@@ -1171,7 +1169,7 @@ class SecurityChecker:
             return {'success': False, 'error': "MarketDataProvider not available", 'data': None}
 
         logger.debug(f"SecurityChecker: Appel de market_data.get_token_holders pour {token_address}")
-        response = await self.market_data.get_token_holders(token_address=token_address, limit=Config.SECURITY_MAX_HOLDERS_TO_FETCH) # Using a config value for limit
+        response = await self.market_data.get_token_holders(token_address=token_address, limit=get_config().SECURITY_MAX_HOLDERS_TO_FETCH) # Using a config value for limit
         
         if not response['success']:
             logger.warning(f"Échec de la récupération des détenteurs de token via MarketDataProvider pour {token_address}: {response['error']}")

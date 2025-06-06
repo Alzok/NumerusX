@@ -1,12 +1,12 @@
 import logging
 import json
 from logging.handlers import RotatingFileHandler
-from app.config import Config
+from app.config_v2 import get_config
 
 class DexLogger:
     def __init__(self):
         self.logger = logging.getLogger('DexBot')
-        self.logger.setLevel(Config.LOG_LEVEL)
+        self.logger.setLevel(get_config().LOG_LEVEL)
         
         formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(message)s'

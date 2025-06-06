@@ -1,6 +1,7 @@
 import React from 'react';
 import { ProfitKpiCard, CountKpiCard } from '@/components/ui/kpi-card';
 import { PortfolioChart } from '@/components/charts/PortfolioChart';
+import ServicesMonitor from '@/components/dashboard/ServicesMonitor';
 import { useBotStatus } from '@/hooks/useBot';
 import { usePortfolioSnapshot, usePortfolioHistory } from '@/hooks/usePortfolio';
 import { useTrades } from '@/hooks/useTrades';
@@ -61,19 +62,29 @@ const DashboardPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Portfolio Chart */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Évolution du Portfolio</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <PortfolioChart 
-            data={portfolioHistory} 
-            timeframe="7d"
-            isLoading={historyLoading}
-          />
-        </CardContent>
-      </Card>
+      {/* Grid layout with Services Monitor */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Portfolio Chart - 2/3 width */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Évolution du Portfolio</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <PortfolioChart 
+              data={portfolioHistory} 
+              timeframe="7d"
+              isLoading={historyLoading}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Services Monitor - 1/3 width */}
+        <div className="lg:col-span-1">
+          <ServicesMonitor />
+        </div>
+      </div>
+
+
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

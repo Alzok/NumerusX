@@ -5,7 +5,6 @@ Handles bot start/stop, status, and configuration.
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
 from datetime import datetime
 import asyncio
 import logging

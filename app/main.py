@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import signal
 import sys
 import os
 # Removed nicegui imports
@@ -17,9 +16,7 @@ from fastapi.staticfiles import StaticFiles # Added StaticFiles
 from fastapi.templating import Jinja2Templates # Added Jinja2Templates (optional, for serving index.html)
 from fastapi.middleware.cors import CORSMiddleware # Added CORSMiddleware
 
-from app.dex_bot import DexBot # Keep for now, might be used by API later
-from app.config import Config
-from app.logger import DexLogger # DexLogger might be obsolete if configure_logging is used
+from app.config_v2 import get_config
 from app.utils.auth import VerifyToken, AuthError # Import VerifyToken and AuthError
 from app.socket_manager import get_socket_manager # Import the new socket manager
 
@@ -40,17 +37,17 @@ app = FastAPI(
 )
 
 # Add CORSMiddleware to the FastAPI app instance
-# Ensure Config.CORS_ALLOWED_ORIGINS is defined and loaded correctly in your Config class.
+# Ensure get_config().CORS_ALLOWED_ORIGINS is defined and loaded correctly in your Config class.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=Config.CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"],
+    allow_origins=get_config().CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"],
     allow_credentials=True,
     allow_methods=["*"], # Allows all methods
     allow_headers=["*"], # Allows all headers
 )
 
 # Initialize SocketManager and get the app and server instance
-cors_origins = Config.CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"]
+cors_origins = get_config().CORS_ALLOWED_ORIGINS if hasattr(Config, 'CORS_ALLOWED_ORIGINS') else ["*"]
 socket_man = get_socket_manager(cors_allowed_origins=cors_origins)
 sio = socket_man.sio # This is the socketio.AsyncServer instance
 # Mount the Socket.IO app. The SocketManager's app is already configured.
@@ -208,7 +205,7 @@ background_tasks = set()
 
 def configure_logging():
     """Configuration avancée du système de logging"""
-    # Ensure Config.LOG_LEVEL and Config.get_log_file_path() are valid
+    # Ensure get_config().LOG_LEVEL and get_config().get_log_file_path() are valid
     log_level_str = getattr(Config, 'LOG_LEVEL', 'INFO').upper()
     log_level = getattr(logging, log_level_str, logging.INFO)
     
@@ -223,7 +220,7 @@ def configure_logging():
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    log_file_path = Config.get_log_file_path() if hasattr(Config, 'get_log_file_path') else "numerusx.log"
+    log_file_path = get_config().get_log_file_path() if hasattr(Config, 'get_log_file_path') else "numerusx.log"
 
     # Handler pour fichiers logs
     file_handler = RotatingFileHandler(
@@ -249,14 +246,14 @@ def check_environment():
     missing = []
     
     # Check for MASTER_ENCRYPTION_KEY which is the current encryption system
-    if not hasattr(Config, 'MASTER_ENCRYPTION_KEY_ENV') or not Config.MASTER_ENCRYPTION_KEY_ENV:
+    if not hasattr(Config, 'MASTER_ENCRYPTION_KEY_ENV') or not get_config().MASTER_ENCRYPTION_KEY_ENV:
         missing.append('MASTER_ENCRYPTION_KEY')
     
     # Check for Solana private key (either plain or encrypted)
     has_solana_key = (
-        (hasattr(Config, 'SOLANA_PRIVATE_KEY_BS58') and Config.SOLANA_PRIVATE_KEY_BS58) or
-        (hasattr(Config, 'ENCRYPTED_SOLANA_PRIVATE_KEY_BS58') and Config.ENCRYPTED_SOLANA_PRIVATE_KEY_BS58) or
-        (hasattr(Config, 'WALLET_PATH') and Config.WALLET_PATH and os.path.exists(Config.WALLET_PATH))
+        (hasattr(Config, 'SOLANA_PRIVATE_KEY_BS58') and get_config().solana.private_key_bs58) or
+        (hasattr(Config, 'ENCRYPTED_SOLANA_PRIVATE_KEY_BS58') and get_config().ENCRYPTED_SOLANA_PRIVATE_KEY_BS58) or
+        (hasattr(Config, 'WALLET_PATH') and get_config().solana.wallet_path and os.path.exists(get_config().solana.wallet_path))
     )
     
     if not has_solana_key:
@@ -265,7 +262,7 @@ def check_environment():
     if missing:
         logging.critical(f"Variables d'environnement critiques manquantes ou non définies: {', '.join(missing)}")
         # In development mode, we can be more lenient
-        if Config.DEV_MODE:
+        if get_config().app.dev_mode:
             logging.warning("Running in DEV_MODE - proceeding despite missing critical variables")
             return
         
@@ -292,15 +289,14 @@ async def startup_event():
 
     # Initialize Redis for FastAPI-Limiter
     try:
-        # Use Config.REDIS_URL which should be correctly formatted
-        redis_connection = redis.from_url(Config.REDIS_URL, encoding="utf-8", decode_responses=True)
+        # Use get_config().redis.url which should be correctly formatted
+        redis_connection = redis.from_url(get_config().redis.url, encoding="utf-8", decode_responses=True)
         await FastAPILimiter.init(redis_connection)
-        logging.info(f"FastAPI-Limiter initialized with Redis: {Config.REDIS_URL}")
+        logging.info(f"FastAPI-Limiter initialized with Redis: {get_config().redis.url}")
     except Exception as e:
         logging.error(f"Failed to initialize FastAPI-Limiter with Redis: {e}. Rate limiting will not work.", exc_info=True)
     
     # Set socket manager for bot routes (for WebSocket notifications)
-    from app.api.v1.bot_routes import set_bot_instance
     # set_bot_instance(global_dex_bot)  # This would be set when DexBot is initialized
 
 
@@ -462,7 +458,7 @@ async def periodic_updates_emitter():
 # In startup_event, you can create and store the background task
 # async def startup_event():
 # ...
-#     if Config.RUN_PERIODIC_SOCKET_UPDATES: # Add a config flag for this
+#     if get_config().RUN_PERIODIC_SOCKET_UPDATES: # Add a config flag for this
 #         emitter_task = asyncio.create_task(periodic_updates_emitter())
 #         background_tasks.add(emitter_task)
 #         emitter_task.add_done_callback(background_tasks.discard)
@@ -488,8 +484,8 @@ if __name__ == "__main__":
     # configure_logging()
     
     # Note: Using final_asgi_app here, which wraps the FastAPI app with Socket.IO
-    uvicorn.run(final_asgi_app, host=Config.API_HOST if hasattr(Config, 'API_HOST') else "0.0.0.0",
-                port=int(Config.API_PORT) if hasattr(Config, 'API_PORT') else 8000,
+    uvicorn.run(final_asgi_app, host=get_config().api.host if hasattr(Config, 'API_HOST') else "0.0.0.0",
+                port=int(get_config().api.port) if hasattr(Config, 'API_PORT') else 8000,
                 log_level=getattr(Config, 'LOG_LEVEL', 'info').lower())
     # The log_level here for uvicorn might be redundant if configure_logging() sets root logger level.
     # Uvicorn's access logs are separate.

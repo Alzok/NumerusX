@@ -1,5 +1,5 @@
 import google.generativeai as genai
-from app.config import Config
+from app.config_v2 import get_config
 import logging
 from typing import Dict, Any, Optional
 import asyncio
@@ -175,7 +175,7 @@ async def main_test():
     # Create a mock Config object or load from app.config for testing
     # For simplicity, directly instantiate, assuming .env is set up
     try:
-        config_instance = Config()
+        config_instance = get_config()
     except Exception as e:
         print(f"Failed to load Config for testing: {e}")
         return

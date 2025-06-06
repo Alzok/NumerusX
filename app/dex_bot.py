@@ -5,19 +5,13 @@ from app.trading.trading_engine import TradingEngine # Assuming this is the corr
 from app.security.security import SecurityChecker # Assuming this is the correct name now
 from app.strategy_framework import BaseStrategy
 from app.strategy_selector import StrategySelector # Import StrategySelector
-from app.logger import DexLogger # Assuming a logger class
-from app.database import EnhancedDatabase
 import time
 import logging
 from typing import List, Dict, Optional, Any, Tuple # Added Tuple
-from app.config import Config
-from app.prediction_engine import PricePredictor, PredictionResult # Import necessary classes
-from app.risk_manager import RiskManager, Position # Import RiskManager and Position
+from app.config_v2 import get_config
 from app.portfolio_manager import PortfolioManager # Ensure this is the main PortfolioManager
 from app.trade_executor import TradeExecutor # Import TradeExecutor
-import pandas as pd
 from app.ai_agent import AIAgent # Import the new AIAgent
-import json # For logging agent decisions
 from app.utils.jupiter_api_client import JupiterApiClient # Added
 from app.utils.exceptions import NumerusXBaseError, DataCollectionError # For general error handling and DataCollectionError
 from datetime import datetime # Added for timestamp_utc
@@ -58,21 +52,21 @@ class PerformanceMonitor:
     
     @property
     def daily_pnl_percentage(self) -> float:
-        if not self.trades or Config.INITIAL_PORTFOLIO_BALANCE_USD == 0:
+        if not self.trades or get_config().INITIAL_PORTFOLIO_BALANCE_USD == 0:
             return 0.0
         now = time.time()
         pnl_24h = sum(t['pnl'] for t in self.trades if now - t['timestamp'] <= 86400)
-        return (pnl_24h / Config.INITIAL_PORTFOLIO_BALANCE_USD) * 100
+        return (pnl_24h / get_config().INITIAL_PORTFOLIO_BALANCE_USD) * 100
 
 class DexBot:
     def __init__(self):
-        self.config = Config()
+        self.config = get_config()
         logger.info("Initializing DexBot components...")
 
         # Core Clients & Providers
         try:
             self.jupiter_client = JupiterApiClient(
-                solana_private_key_bs58=self.config.SOLANA_PRIVATE_KEY_BS58,
+                solana_private_key_bs58=self.get_config().solana.private_key_bs58,
                 rpc_url=self.config.RPC_URL, # JupiterApiClient will use default if None
                 config=self.config 
             )
@@ -97,7 +91,7 @@ class DexBot:
         # Managers & Checkers
         try:
             self.portfolio_manager = PortfolioManager(
-                db_path=self.config.DB_PATH,
+                db_path=self.get_config().database.db_path,
                 market_data_provider=self.market_data_provider
             )
             logger.info("PortfolioManager initialized.")
@@ -114,7 +108,7 @@ class DexBot:
             # For now, assuming a synchronous way or it's handled in an async setup method
 
             self.security_checker = SecurityChecker(
-                # db_path=self.config.DB_PATH, # SecurityChecker might not need DB
+                # db_path=self.get_config().database.db_path, # SecurityChecker might not need DB
                 market_data_provider=self.market_data_provider,
                 config=self.config
             )
@@ -245,7 +239,7 @@ class DexBot:
             return None
 
         symbol1, symbol2 = parts[0].upper(), parts[1].upper()
-        base_asset_sym = self.config.BASE_ASSET_SYMBOL.upper()
+        base_asset_sym = self.get_config().trading.base_asset_SYMBOL.upper()
         
         target_symbol: Optional[str] = None
         base_symbol_for_pair: Optional[str] = None # This will be the other token in the pair, not necessarily THE base asset of the bot
@@ -274,7 +268,7 @@ class DexBot:
             # If it's the bot's base asset, we use its mint from config.
             # Otherwise, we fetch its info too.
             if base_symbol_for_pair == base_asset_sym:
-                base_mint = self.config.BASE_ASSET # Mint address of USDC, etc.
+                base_mint = self.get_config().trading.base_asset # Mint address of USDC, etc.
             else:
                 # This case is currently excluded by the logic above, but if supported in future:
                 base_token_info_res = await self.market_data_provider.get_token_info(base_symbol_for_pair)
@@ -658,10 +652,10 @@ class DexBot:
 
 async def main():
     # Load configuration
-    config = Config()
+    config = get_config()
     
     # Configure logging (basic example)
-    log_level = logging.DEBUG if config.DEBUG_MODE else logging.INFO
+    log_level = logging.DEBUG if get_config().app.debug_MODE else logging.INFO
     logging.basicConfig(level=log_level, 
                         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                         handlers=[logging.StreamHandler()]) # Add file handler for production

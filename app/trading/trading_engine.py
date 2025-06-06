@@ -1,25 +1,18 @@
-import asyncio
 import logging
 import time
-from typing import Dict, Any, Optional, List, Tuple, Union
 from solana.rpc.async_api import AsyncClient
 from solana.transaction import Transaction
 from solders.keypair import Keypair
-from solders.signature import Signature
 from solana.rpc.commitment import Confirmed
 
 import base58
 import os
 import json
 import aiohttp
-from solders.transaction import VersionedTransaction
-from solders.message import Message
-from solana.exceptions import SolanaRpcException
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from solana.rpc.types import TxOpts
 
 from app.market.market_data import MarketDataProvider
-from app.config import Config, EncryptionUtil
+from app.config_v2 import get_config, EncryptionUtil
 from app.utils.jupiter_api_client import JupiterApiClient
 from app.utils.exceptions import (
     JupiterAPIError, SolanaTransactionError, TransactionExpiredError, 
@@ -43,10 +36,10 @@ class TradingEngine:
         Args:
             wallet_path: Chemin vers le fichier de clé du portefeuille. Ce chemin est la source principale.
                          Si ce fichier n'est pas valide ou non trouvé, des fallbacks seront tentés.
-            rpc_url: URL du point de terminaison RPC Solana. Utilise Config.SOLANA_RPC_URL par défaut.
+            rpc_url: URL du point de terminaison RPC Solana. Utilise get_config().solana.rpc_url par défaut.
         """
-        self.config = Config() # Initialize Config instance
-        self.rpc_url = rpc_url if rpc_url is not None else self.config.SOLANA_RPC_URL
+        self.config = get_config() # Initialize Config instance
+        self.rpc_url = rpc_url if rpc_url is not None else self.get_config().solana.rpc_url
         self.client = AsyncClient(self.rpc_url)
         self.wallet = self._initialize_wallet(wallet_path)
         self.market_data_provider = None
@@ -68,7 +61,7 @@ class TradingEngine:
                 # For now, we assume SOLANA_PRIVATE_KEY_BS58 from config is the one to use for Jupiter API calls.
                 # This aligns with JupiterApiClient's current __init__ which expects a private_key_bs58 string.
                 # If self.wallet is the sole source of truth for the key, JupiterApiClient init needs adjustment.
-                # Based on current JupiterApiClient, it uses config.SOLANA_PRIVATE_KEY_BS58 if available.
+                # Based on current JupiterApiClient, it uses get_config().solana.private_key_bs58 if available.
                 
                 # Let's pass the loaded wallet's private key directly to JupiterApiClient.
                 # The Keypair object stores the private key as the first 32 bytes of its 64-byte internal representation (_keypair).
@@ -76,7 +69,7 @@ class TradingEngine:
                 # The _initialize_wallet tries to load from file or env (SOLANA_PRIVATE_KEY_BS58).
                 # So, SOLANA_PRIVATE_KEY_BS58 should be available in self.config if that was the source.
                 
-                private_key_for_jupiter = self.config.SOLANA_PRIVATE_KEY_BS58 
+                private_key_for_jupiter = self.get_config().solana.private_key_bs58 
                 if not private_key_for_jupiter:
                     # Fallback: If wallet was loaded from a file and not env var, we might need to derive bs58 from keypair if possible
                     # Or ensure that the primary_wallet_path content *is* the bs58 key if used for Jupiter.
@@ -117,7 +110,7 @@ class TradingEngine:
         decrypted_content = None
 
         # Attempt decryption if MASTER_ENCRYPTION_KEY is available in Config and usable
-        if Config.MASTER_ENCRYPTION_KEY_ENV: # Check if key is set
+        if get_config().MASTER_ENCRYPTION_KEY_ENV: # Check if key is set
             logger.debug(f"MASTER_ENCRYPTION_KEY is set. Attempting to decrypt content of {file_path}.")
             # EncryptionUtil.decrypt expects base64 encoded ciphertext.
             # We assume the file content *is* the base64 encoded ciphertext.
@@ -223,8 +216,8 @@ class TradingEngine:
         Initialise le portefeuille de manière sécurisée avec validation et fallbacks.
         Ordre de tentative:
         1. Chemin principal fourni (`primary_wallet_path`).
-        2. Chemin de secours (`Config.BACKUP_WALLET_PATH`).
-        3. Variable d'environnement (`Config.SOLANA_PRIVATE_KEY_BS58`).
+        2. Chemin de secours (`get_config().BACKUP_WALLET_PATH`).
+        3. Variable d'environnement (`get_config().solana.private_key_bs58`).
         
         Args:
             primary_wallet_path: Chemin principal vers le fichier de clé du portefeuille.
@@ -255,24 +248,24 @@ class TradingEngine:
 
 
         # Attempt 2: Load from backup wallet_path
-        if Config.BACKUP_WALLET_PATH:
-            logger.info(f"Attempting to load wallet from backup path: {Config.BACKUP_WALLET_PATH}")
+        if get_config().BACKUP_WALLET_PATH:
+            logger.info(f"Attempting to load wallet from backup path: {get_config().BACKUP_WALLET_PATH}")
             try:
-                keypair = self._load_keypair_from_file(Config.BACKUP_WALLET_PATH)
+                keypair = self._load_keypair_from_file(get_config().BACKUP_WALLET_PATH)
                 if keypair:
-                    logger.info(f"Wallet initialized successfully from backup path: {Config.BACKUP_WALLET_PATH}. Address: {keypair.pubkey()}")
+                    logger.info(f"Wallet initialized successfully from backup path: {get_config().BACKUP_WALLET_PATH}. Address: {keypair.pubkey()}")
                     return keypair
             except Exception as e:
-                msg = f"Failed to load wallet from backup path '{Config.BACKUP_WALLET_PATH}': {e}"
+                msg = f"Failed to load wallet from backup path '{get_config().BACKUP_WALLET_PATH}': {e}"
                 logger.warning(msg)
                 error_messages.append(msg)
         else:
-            logger.info("No backup wallet path configured (Config.BACKUP_WALLET_PATH is empty).")
+            logger.info("No backup wallet path configured (get_config().BACKUP_WALLET_PATH is empty).")
             # No error_message append here as it's optional
 
         # Attempt 3: Load from environment variable
         # SOLANA_PRIVATE_KEY_BS58 is now expected to be in Config class
-        if Config.SOLANA_PRIVATE_KEY_BS58: # Check if the attribute itself exists and is not None/empty
+        if get_config().solana.private_key_bs58: # Check if the attribute itself exists and is not None/empty
              logger.info(f"Attempting to load wallet from SOLANA_PRIVATE_KEY_BS58 environment variable.")
              try:
                  keypair = self._load_keypair_from_env_var("SOLANA_PRIVATE_KEY_BS58")
@@ -284,7 +277,7 @@ class TradingEngine:
                 logger.warning(msg)
                 error_messages.append(msg)
         else:
-            logger.info("No SOLANA_PRIVATE_KEY_BS58 environment variable configured or Config.SOLANA_PRIVATE_KEY_BS58 is empty.")
+            logger.info("No SOLANA_PRIVATE_KEY_BS58 environment variable configured or get_config().solana.private_key_bs58 is empty.")
             # No error_message append here as it's optional
 
         # If all attempts fail
@@ -377,7 +370,7 @@ class TradingEngine:
         if amount_in_tokens_float and amount_in_usd:
             return {'success': False, 'error': "Provide either amount_in_tokens_float or amount_in_usd, not both.", 'signature': None, 'details': None}
 
-        final_slippage_bps = slippage_bps if slippage_bps is not None else self.config.JUPITER_DEFAULT_SLIPPAGE_BPS
+        final_slippage_bps = slippage_bps if slippage_bps is not None else self.get_config().jupiter.default_slippage_bps
         final_swap_mode = swap_mode if swap_mode is not None else self.config.JUPITER_SWAP_MODE
 
         amount_lamports: Optional[int] = None
@@ -469,7 +462,7 @@ class TradingEngine:
         return self.market_data_provider
 
     @retry(
-        stop=stop_after_attempt(Config.JUPITER_MAX_RETRIES if hasattr(Config, 'JUPITER_MAX_RETRIES') else 3),
+        stop=stop_after_attempt(get_config().JUPITER_MAX_RETRIES if hasattr(Config, 'JUPITER_MAX_RETRIES') else 3),
         wait=wait_exponential(multiplier=1, min=1, max=5),
         retry=retry_if_exception_type(TransactionExpiredError),
         reraise=True # Reraise the exception if all retries fail

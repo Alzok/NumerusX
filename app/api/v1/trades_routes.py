@@ -12,7 +12,6 @@ from uuid import UUID, uuid4
 import logging
 
 from app.api.v1.auth_routes import require_auth, User, verify_token, TokenData
-from app.trade_executor import TradeExecutor
 
 router = APIRouter(prefix="/api/v1/trades", tags=["trades"])
 logger = logging.getLogger(__name__)

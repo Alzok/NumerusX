@@ -1,7 +1,6 @@
 from app.database import EnhancedDatabase
-from app.config import Config
+from app.config_v2 import get_config
 from app.market.market_data import MarketDataProvider # Import MarketDataProvider
-from app.utils.exceptions import DatabaseError # Assuming custom exception
 from typing import List, Dict, Optional, Any
 import logging
 import time # For timestamping
@@ -14,10 +13,10 @@ class PortfolioManager:
         """Manages the portfolio, including cash, positions, and overall value."""
         self.db = EnhancedDatabase(db_path)
         self.market_data_provider = market_data_provider
-        self.base_currency = Config.BASE_ASSET # e.g., USDC mint address
+        self.base_currency = get_config().trading.base_asset # e.g., USDC mint address
         # Initialize cash balance from DB or config, for now, from config.
         # A more robust approach would load last known cash balance from DB.
-        self._current_cash_balance_usd = Config.INITIAL_PORTFOLIO_BALANCE_USD
+        self._current_cash_balance_usd = get_config().INITIAL_PORTFOLIO_BALANCE_USD
         logger.info(f"PortfolioManager initialized. Initial cash: ${self._current_cash_balance_usd:.2f} USD")
 
     def get_available_cash_for_trading(self) -> float:

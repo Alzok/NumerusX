@@ -1,14 +1,12 @@
-import asyncio
 import time
 import logging # Changed from app.logger import DexLogger to standard logging
 from typing import Dict, Any, Optional
 
-from app.config import Config
+from app.config_v2 import get_config
 from app.trading.trading_engine import TradingEngine
 from app.portfolio_manager import PortfolioManager
 from app.risk_manager import RiskManager, Position
 from app.market.market_data import MarketDataProvider
-from app.utils.exceptions import TradingError # Assuming a general trading error
 
 # Use standard logger, can be configured externally
 logger = logging.getLogger(__name__)
@@ -55,7 +53,7 @@ class TradeExecutor:
             agent_take_profit_price = agent_order.get('take_profit_price')
             agent_reasoning = agent_order.get('reasoning', "No reasoning provided.")
             # Use slippage from agent_order if provided, otherwise from Config
-            agent_slippage_bps = agent_order.get('slippage_bps', self.config.JUPITER_DEFAULT_SLIPPAGE_BPS)
+            agent_slippage_bps = agent_order.get('slippage_bps', self.get_config().jupiter.default_slippage_bps)
 
             if decision == 'HOLD' or not decision:
                 logger.info(f"[{trade_id_for_logging}] Agent decision is 'HOLD' or no decision. No trade executed for {token_pair_str}. Reasoning: {agent_reasoning}")
@@ -81,7 +79,7 @@ class TradeExecutor:
             # For now, let's assume we can get mints from symbols, or that AIAgent provides mints directly.
             # If AIAgent provides "SOL/USDC", we need to map these to mints.
             # For this example, let's assume a direct mapping from common symbols to mints if needed,
-            # or that the agent_order.pair is actually "MINT1_ADDRESS/MINT2_ADDRESS" or one is Config.BASE_ASSET symbol.
+            # or that the agent_order.pair is actually "MINT1_ADDRESS/MINT2_ADDRESS" or one is get_config().trading.base_asset symbol.
 
             # Simpler: Assume one of the tokens in the pair is the BASE_ASSET (e.g., USDC)
             # and the other is the one we are interested in trading.
@@ -89,16 +87,16 @@ class TradeExecutor:
             target_token_symbol: Optional[str] = None
             other_token_symbol: Optional[str] = None
 
-            if token_symbol_0 == self.config.BASE_ASSET_SYMBOL: # e.g. USDC/SOL
+            if token_symbol_0 == self.get_config().trading.base_asset_SYMBOL: # e.g. USDC/SOL
                 target_token_symbol = token_symbol_1 # e.g. SOL
                 other_token_symbol = token_symbol_0  # e.g. USDC
-            elif token_symbol_1 == self.config.BASE_ASSET_SYMBOL: # e.g. SOL/USDC
+            elif token_symbol_1 == self.get_config().trading.base_asset_SYMBOL: # e.g. SOL/USDC
                 target_token_symbol = token_symbol_0 # e.g. SOL
                 other_token_symbol = token_symbol_1  # e.g. USDC
             else:
                 # Fallback: if neither is BASE_ASSET_SYMBOL, maybe agent_order.pair should be the target token's mint?
                 # For now, we require one of them to be the base asset for clarity.
-                logger.error(f"[{trade_id_for_logging}] Could not determine target token from pair '{token_pair_str}'. One token must be BASE_ASSET_SYMBOL '{self.config.BASE_ASSET_SYMBOL}'.")
+                logger.error(f"[{trade_id_for_logging}] Could not determine target token from pair '{token_pair_str}'. One token must be BASE_ASSET_SYMBOL '{self.get_config().trading.base_asset_SYMBOL}'.")
                 return False
 
             # Get mint addresses for target_token_symbol and other_token_symbol (which is base_asset_symbol)
@@ -114,7 +112,7 @@ class TradeExecutor:
             target_token_mint = target_token_info_res['data']['mint']
             target_token_decimals = target_token_info_res['data']['decimals']
             
-            base_asset_mint = self.config.BASE_ASSET # e.g., USDC mint
+            base_asset_mint = self.get_config().trading.base_asset # e.g., USDC mint
 
             input_token_mint: Optional[str] = None
             output_token_mint: Optional[str] = None

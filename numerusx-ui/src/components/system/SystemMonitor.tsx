@@ -8,11 +8,11 @@ import { Button } from '@/components/ui/button';
 import { 
   Activity, 
   Server, 
-  Database, 
-  Zap, 
+ 
+ 
   AlertTriangle, 
   CheckCircle,
-  Clock,
+
   MemoryStick,
   HardDrive,
   Wifi,
@@ -42,7 +42,7 @@ export const SystemMonitor: React.FC = () => {
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   // System Health Query
-  const { data: systemHealth, isLoading: healthLoading, refetch: refetchHealth } = useQuery({
+  const { data: _systemHealth, isLoading: _healthLoading, refetch: refetchHealth } = useQuery({
     queryKey: ['system', 'health'],
     queryFn: async () => {
       const response = await apiClient.get('/api/v1/system/health');
@@ -52,7 +52,7 @@ export const SystemMonitor: React.FC = () => {
   });
 
   // System Metrics Query
-  const { data: systemMetrics, isLoading: metricsLoading, refetch: refetchMetrics } = useQuery({
+  const { data: systemMetrics, isLoading: _metricsLoading, refetch: refetchMetrics } = useQuery({
     queryKey: ['system', 'metrics'],
     queryFn: async () => {
       const response = await apiClient.get('/api/v1/system/metrics');
@@ -62,7 +62,7 @@ export const SystemMonitor: React.FC = () => {
   });
 
   // Service Status Query
-  const { data: services, isLoading: servicesLoading, refetch: refetchServices } = useQuery({
+  const { data: services, isLoading: _servicesLoading, refetch: refetchServices } = useQuery({
     queryKey: ['system', 'services'],
     queryFn: async () => {
       const response = await apiClient.get('/api/v1/system/services');

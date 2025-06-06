@@ -1,12 +1,9 @@
 import logging
 import time
 import numpy as np
-import pandas as pd
 import json
 import os
-from typing import Dict, Any, List, Tuple, Optional, Union
 from dataclasses import dataclass
-import asyncio
 
 # Configuration du logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -212,14 +209,14 @@ class RiskManager:
                 logger.warning(f"[RiskManager] Entry price and stop_loss_price are identical for {token_symbol}. Cannot calculate size based on SL.")
                 # This implies zero risk per unit if trade goes wrong instantly, which is problematic.
                 # Set to a very small size or 0, or rely on other methods.
-                calculated_size_sl = Config.MIN_ORDER_VALUE_USD # Or 0.0 if this case should prevent trade
+                calculated_size_sl = get_config().trading.min_order_value_usd # Or 0.0 if this case should prevent trade
             else:
                 risk_per_unit_fraction = abs(entry_price - stop_loss_price) / entry_price
                 if risk_per_unit_fraction > 0:
                     max_risk_amount_for_trade = self.portfolio_value * self.target_risk_per_trade
                     calculated_size_sl = max_risk_amount_for_trade / risk_per_unit_fraction
                 else: # Should not happen if entry_price != stop_loss_price
-                    calculated_size_sl = Config.MIN_ORDER_VALUE_USD # Default to min size if risk_per_unit_fraction is zero for some reason
+                    calculated_size_sl = get_config().trading.min_order_value_usd # Default to min size if risk_per_unit_fraction is zero for some reason
         
         # Taille maximale de position (pourcentage du portefeuille)
         max_size_by_pct_portfolio = self.portfolio_value * self.max_position_size_pct
@@ -233,13 +230,13 @@ class RiskManager:
         
         # Si la taille calculée est infime (ou inf), cela signifie qu'une des méthodes n'a pas pu calculer
         # ou a estimé le risque trop haut. On pourrait mettre un seuil minimal.
-        if final_calculated_size == float('inf') or final_calculated_size < Config.MIN_ORDER_VALUE_USD / 2: # Allow slightly below MIN_ORDER_VALUE if other calcs are good
+        if final_calculated_size == float('inf') or final_calculated_size < get_config().trading.min_order_value_usd / 2: # Allow slightly below MIN_ORDER_VALUE if other calcs are good
             # This case means either SL size was inf (no SL) AND Kelly/Vol size was 0 or inf.
             # Or, the min of all constraints led to a very small value.
             # If Kelly/Vol was positive, use that, otherwise it might be risky.
-            if calculated_size_kelly_vol > Config.MIN_ORDER_VALUE_USD / 2 and calculated_size_kelly_vol < max_size_by_pct_portfolio : # Check if Kelly/Vol was reasonable
+            if calculated_size_kelly_vol > get_config().trading.min_order_value_usd / 2 and calculated_size_kelly_vol < max_size_by_pct_portfolio : # Check if Kelly/Vol was reasonable
                  final_calculated_size = calculated_size_kelly_vol
-            elif calculated_size_sl != float('inf') and calculated_size_sl > Config.MIN_ORDER_VALUE_USD / 2 and calculated_size_sl < max_size_by_pct_portfolio:
+            elif calculated_size_sl != float('inf') and calculated_size_sl > get_config().trading.min_order_value_usd / 2 and calculated_size_sl < max_size_by_pct_portfolio:
                  final_calculated_size = calculated_size_sl # Fallback to SL if Kelly/Vol was zero
             else:
                 logger.info(f"[RiskManager] {token_symbol} - Taille calculée finale trop petite ou non déterminée avant contraintes agent/portefeuille. Taille brute: {final_calculated_size}")
@@ -262,8 +259,8 @@ class RiskManager:
         final_size = self._apply_portfolio_constraints(token_address, final_size)
 
         # Assurer que la taille finale n'est pas en dessous du minimum acceptable pour un trade
-        if final_size < Config.MIN_ORDER_VALUE_USD:
-            logger.info(f"[RiskManager] Taille finale pour {token_symbol} (${final_size:.2f}) < Min Order Value (${Config.MIN_ORDER_VALUE_USD}). Trade annulé.")
+        if final_size < get_config().trading.min_order_value_usd:
+            logger.info(f"[RiskManager] Taille finale pour {token_symbol} (${final_size:.2f}) < Min Order Value (${get_config().trading.min_order_value_usd}). Trade annulé.")
             return 0.0
             
         logger.info(f"[RiskManager] Taille de position finale décidée pour {token_symbol}: ${final_size:.2f}")

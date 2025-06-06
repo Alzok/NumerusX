@@ -6,12 +6,10 @@ Compatible with Auth0 tokens using RS256 algorithm.
 import os
 import jwt
 import requests
-from typing import Optional, Dict, Any
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from functools import lru_cache
 from datetime import datetime
-import json
 
 security = HTTPBearer()
 

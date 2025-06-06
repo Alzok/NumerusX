@@ -3,11 +3,10 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, Any, Optional, Union, List, Tuple
 from cachetools import TTLCache
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from app.config import Config
+from app.config_v2 import get_config
 # from app.utils.jupiter_api_client import JupiterApiClient  # Temporarily disabled - SDK not installed
 from app.utils.exceptions import (
     JupiterAPIError, DexScreenerAPIError, SolanaTransactionError, 
@@ -24,10 +23,10 @@ class MarketDataProvider:
     def __init__(self):
         """
         Initialise le fournisseur de données de marché.
-        Utilise les paramètres de cache et de rate limit depuis Config.
+        Utilise les paramètres de cache et de rate limit depuis get_config().
         """
         self.session = None
-        self.config = Config() # Store config instance
+        self.config = get_config() # Store config instance
 
         # Initialize JupiterApiClient
         # It's crucial that SOLANA_PRIVATE_KEY_BS58 and SOLANA_RPC_URL are correctly set in Config
@@ -35,11 +34,11 @@ class MarketDataProvider:
         # We'll use the general SOLANA_PRIVATE_KEY_BS58 for now, assuming it has sufficient permissions
         # or that a specific data API key will be added to Config later if needed.
         self.jupiter_client: Optional[JupiterApiClient] = None
-        if self.config.SOLANA_PRIVATE_KEY_BS58 and self.config.SOLANA_RPC_URL:
+        if self.get_config().solana.private_key_bs58 and self.get_config().solana.rpc_url:
             try:
                 self.jupiter_client = JupiterApiClient(
-                    private_key_bs58=self.config.SOLANA_PRIVATE_KEY_BS58, # Or a specific data API key from config
-                    rpc_url=self.config.SOLANA_RPC_URL,
+                    private_key_bs58=self.get_config().solana.private_key_bs58, # Or a specific data API key from config
+                    rpc_url=self.get_config().solana.rpc_url,
                     config=self.config
                 )
                 logger.info("JupiterApiClient initialized successfully in MarketDataProvider.")
@@ -47,25 +46,25 @@ class MarketDataProvider:
                 logger.error(f"Failed to initialize JupiterApiClient in MarketDataProvider: {e}", exc_info=True)
                 # Proceeding without jupiter_client, Jupiter-dependent methods will fail gracefully.
         else:
-            logger.warning("JupiterApiClient cannot be initialized in MarketDataProvider: SOLANA_PRIVATE_KEY_BS58 or SOLANA_RPC_URL missing in Config.")
+            logger.warning("JupiterApiClient cannot be initialized in MarketDataProvider: SOLANA_PRIVATE_KEY_BS58 or SOLANA_RPC_URL missing in get_config().")
 
         # Cache pour les différents types de données
-        self.price_cache = TTLCache(maxsize=Config.MARKET_DATA_CACHE_MAX_SIZE, ttl=Config.MARKET_DATA_CACHE_TTL_SECONDS)
-        self.token_info_cache = TTLCache(maxsize=Config.MARKET_DATA_CACHE_MAX_SIZE, ttl=Config.MARKET_DATA_CACHE_TTL_SECONDS * 5)
-        self.liquidity_cache = TTLCache(maxsize=Config.MARKET_DATA_CACHE_MAX_SIZE, ttl=Config.MARKET_DATA_CACHE_TTL_SECONDS // 2)
-        self.pairs_cache = TTLCache(maxsize=Config.MARKET_DATA_CACHE_MAX_SIZE // 10, ttl=Config.MARKET_DATA_CACHE_TTL_SECONDS * 10) # Cache for pairs
-        self.historical_data_cache = TTLCache(maxsize=Config.MARKET_DATA_CACHE_MAX_SIZE // 2, ttl=Config.MARKET_DATA_CACHE_TTL_SECONDS * 2) # Cache for historical data
-        self.jupiter_quote_cache = TTLCache(maxsize=Config.MARKET_DATA_CACHE_MAX_SIZE // 5, ttl=Config.MARKET_DATA_CACHE_TTL_SECONDS // 4) # Cache for Jupiter quotes
+        self.price_cache = TTLCache(maxsize=get_config().MARKET_DATA_CACHE_MAX_SIZE, ttl=get_config().MARKET_DATA_CACHE_TTL_SECONDS)
+        self.token_info_cache = TTLCache(maxsize=get_config().MARKET_DATA_CACHE_MAX_SIZE, ttl=get_config().MARKET_DATA_CACHE_TTL_SECONDS * 5)
+        self.liquidity_cache = TTLCache(maxsize=get_config().MARKET_DATA_CACHE_MAX_SIZE, ttl=get_config().MARKET_DATA_CACHE_TTL_SECONDS // 2)
+        self.pairs_cache = TTLCache(maxsize=get_config().MARKET_DATA_CACHE_MAX_SIZE // 10, ttl=get_config().MARKET_DATA_CACHE_TTL_SECONDS * 10) # Cache for pairs
+        self.historical_data_cache = TTLCache(maxsize=get_config().MARKET_DATA_CACHE_MAX_SIZE // 2, ttl=get_config().MARKET_DATA_CACHE_TTL_SECONDS * 2) # Cache for historical data
+        self.jupiter_quote_cache = TTLCache(maxsize=get_config().MARKET_DATA_CACHE_MAX_SIZE // 5, ttl=get_config().MARKET_DATA_CACHE_TTL_SECONDS // 4) # Cache for Jupiter quotes
         
         # Initialiser les limites de taux à partir de Config
         self.rate_limits = {}
-        for api_name, limits in Config.API_RATE_LIMITS.items():
+        for api_name, limits in get_config().API_RATE_LIMITS.items():
             self.rate_limits[api_name] = {
                 "calls": 0,
                 "last_reset": time.time(),
                 "limit": limits.get("limit", 50), # Default limit if not specified
                 "window_seconds": limits.get("window_seconds", 60), # Default window if not specified
-                "wait_seconds": limits.get("default_wait", Config.DEFAULT_API_RATE_LIMIT_WAIT_SECONDS) # Default wait
+                "wait_seconds": limits.get("default_wait", get_config().DEFAULT_API_RATE_LIMIT_WAIT_SECONDS) # Default wait
             }
 
     async def __aenter__(self):
@@ -343,11 +342,11 @@ class MarketDataProvider:
             self.session = aiohttp.ClientSession()
             
         # DexScreener API for token pairs
-        url = f"{Config.DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}/pools?include=dexId,baseToken,quoteToken,liquidity,priceUsd,volume" # More targeted query
+        url = f"{get_config().DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}/pools?include=dexId,baseToken,quoteToken,liquidity,priceUsd,volume" # More targeted query
         logger.debug(f"DexScreener price request: GET {url}")
 
         try:
-            async with self.session.get(url, timeout=Config.API_TIMEOUT_SECONDS) as response:
+            async with self.session.get(url, timeout=get_config().API_TIMEOUT_SECONDS) as response:
                 response_text = await response.text()
                 if response.status == 200:
                     try:
@@ -488,10 +487,10 @@ class MarketDataProvider:
         if not self.session or self.session.closed:
             self.session = aiohttp.ClientSession()
 
-        url = f"{Config.DEXSCREENER_API_URL}/latest/dex/pairs/{Config.SOLANA_CHAIN_ID_DEXSCREENER}/{pool_address}" # Assuming Solana chain and pool address format
+        url = f"{get_config().DEXSCREENER_API_URL}/latest/dex/pairs/{get_config().SOLANA_CHAIN_ID_DEXSCREENER}/{pool_address}" # Assuming Solana chain and pool address format
         logger.debug(f"DexScreener specific pool liquidity request: GET {url}")
         try:
-            async with self.session.get(url, timeout=Config.API_TIMEOUT_SECONDS) as response:
+            async with self.session.get(url, timeout=get_config().API_TIMEOUT_SECONDS) as response:
                 response_text = await response.text()
                 if response.status == 200:
                     try:
@@ -533,10 +532,10 @@ class MarketDataProvider:
         if not self.session or self.session.closed:
             self.session = aiohttp.ClientSession()
 
-        url = f"{Config.DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}/pools"
+        url = f"{get_config().DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}/pools"
         logger.debug(f"DexScreener best liquidity (pools) request: GET {url}")
         try:
-            async with self.session.get(url, timeout=Config.API_TIMEOUT_SECONDS) as response:
+            async with self.session.get(url, timeout=get_config().API_TIMEOUT_SECONDS) as response:
                 response_text = await response.text()
                 if response.status == 200:
                     try:
@@ -607,7 +606,7 @@ class MarketDataProvider:
 
         if exchange.lower() == "dexscreener":
             # 1. Find the most liquid pair for the token_address on DexScreener
-            pairs_info_url = f"{Config.DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}"
+            pairs_info_url = f"{get_config().DEXSCREENER_API_URL}/latest/dex/tokens/{token_address}"
             pairs_response = await self._make_api_request("GET", pairs_info_url, "dexscreener_pairs_for_historical")
 
             if not pairs_response['success'] or not pairs_response['data'].get("pairs"):
@@ -644,7 +643,7 @@ class MarketDataProvider:
             selected_res_info = ds_resolution_map[timeframe]
             
             # Use the token specific OHLCV endpoint
-            ohlcv_url = f"{Config.DEXSCREENER_API_URL}/latest/dex/tokens/ohlcv/solana/{token_address}/{selected_res_info['res']}"
+            ohlcv_url = f"{get_config().DEXSCREENER_API_URL}/latest/dex/tokens/ohlcv/solana/{token_address}/{selected_res_info['res']}"
             params_ohlcv = {"limit_int": min(limit, 1000)} # Max limit 1000 for this endpoint
             
             # Make the API request using the corrected URL and parameters
@@ -746,7 +745,7 @@ class MarketDataProvider:
         try:
             # 2. Call JupiterApiClient.get_quote
             # Slippage will be handled by JupiterApiClient using config default if not provided here.
-            actual_slippage_bps = slippage_bps if slippage_bps is not None else self.config.JUPITER_DEFAULT_SLIPPAGE_BPS
+            actual_slippage_bps = slippage_bps if slippage_bps is not None else self.get_config().jupiter.default_slippage_bps
 
             # JupiterApiClient.get_quote now returns data directly or raises JupiterAPIError.
             quote_data_sdk = await self.jupiter_client.get_quote(

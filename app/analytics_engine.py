@@ -6,9 +6,8 @@ except ImportError:
     HAS_TALIB = False
     import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Union, Any
 import logging
-from app.config import Config
+from app.config_v2 import get_config
 from app.strategy_framework import BaseStrategy
 
 class AdvancedTradingStrategy(BaseStrategy):
@@ -105,7 +104,7 @@ class AdvancedTradingStrategy(BaseStrategy):
     def _volume_analysis(self, pair_data: Dict) -> int:
         try:
             liquidity = pair_data.get('liquidity_usd', 0.0) 
-            return 1 if liquidity > Config.MIN_LIQUIDITY_USD else 0
+            return 1 if liquidity > get_config().MIN_LIQUIDITY_USD else 0
         except Exception as e:
             self.logger.error(f"Erreur analyse volume: {str(e)}")
             return 0
@@ -148,10 +147,10 @@ class AdvancedTradingStrategy(BaseStrategy):
             if volume_quality == 0:
                 return {'signal': 'hold', 'confidence': 0.1, 'reason': 'Low volume quality'}
 
-            if momentum_score > Config.TRADE_CONFIDENCE_THRESHOLD and market_structure_ratio > 0.6:
+            if momentum_score > get_config().TRADE_CONFIDENCE_THRESHOLD and market_structure_ratio > 0.6:
                 signal = 'buy'
                 confidence = min(0.95, momentum_score * 0.8 + market_structure_ratio * 0.2)
-            elif momentum_score < (1 - Config.TRADE_CONFIDENCE_THRESHOLD) and market_structure_ratio < 0.4:
+            elif momentum_score < (1 - get_config().TRADE_CONFIDENCE_THRESHOLD) and market_structure_ratio < 0.4:
                 signal = 'sell'
                 confidence = min(0.95, (1-momentum_score) * 0.8 + (1-market_structure_ratio) * 0.2)
 

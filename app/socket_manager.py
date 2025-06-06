@@ -1,12 +1,11 @@
 import socketio
 import logging
-import json
 from typing import Any, Dict, Optional
 from datetime import datetime
 import jwt
 from jwt import InvalidTokenError
 
-from app.config import Config
+from app.config_v2 import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +43,8 @@ class SocketManager:
             
             payload = jwt.decode(
                 token, 
-                Config.JWT_SECRET_KEY, 
-                algorithms=[Config.JWT_ALGORITHM]
+                get_config().security.jwt_secret_key, 
+                algorithms=[get_config().JWT_ALGORITHM]
             )
             return payload
         except InvalidTokenError as e:

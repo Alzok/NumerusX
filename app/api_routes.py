@@ -1,15 +1,11 @@
-from fastapi import FastAPI, Depends, HTTPException, Header, status, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, List, Optional, Any
 import logging
-import asyncio
 
-from app.config import Config
+from app.config_v2 import get_config
 from app.security.security import Security
 from app.trading.trading_engine import TradingEngine
 from app.analytics_engine import AdvancedTradingStrategy
-from app.database import db, User, Trade
 from app.wallet import SolanaWallet
 
 # Création de l'application FastAPI
@@ -18,7 +14,7 @@ app = FastAPI(title="NumerusX Trading API", version="1.0.0")
 # Configuration CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=Config.CORS_ALLOWED_ORIGINS.split(',') if Config.CORS_ALLOWED_ORIGINS else ["*"],
+    allow_origins=get_config().CORS_ALLOWED_ORIGINS.split(',') if get_config().CORS_ALLOWED_ORIGINS else ["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

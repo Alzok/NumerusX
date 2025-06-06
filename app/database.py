@@ -1,15 +1,14 @@
 import sqlite3
 import json
 import os
-from app.config import Config
+from app.config_v2 import get_config
 import logging
-from typing import List, Dict, Optional, Any
 from datetime import datetime
 import uuid
 
 class EnhancedDatabase:
     def __init__(self, db_path: Optional[str] = None):
-        self.db_path = db_path or Config.DB_PATH
+        self.db_path = db_path or get_config().database.db_path
         self.conn = sqlite3.connect(self.db_path)
         self.conn.row_factory = sqlite3.Row  # Enable dict-like access to rows
         self.logger = logging.getLogger('Database')
@@ -197,7 +196,7 @@ class EnhancedDatabase:
             try:
                 amount = float(trade_data['amount'])
                 entry_price = float(trade_data.get('entry_price', 0.0))
-                slippage_bps = int(trade_data.get('slippage_bps', Config.JUPITER_DEFAULT_SLIPPAGE_BPS if hasattr(Config, 'JUPITER_DEFAULT_SLIPPAGE_BPS') else 50))
+                slippage_bps = int(trade_data.get('slippage_bps', get_config().jupiter.default_slippage_bps if hasattr(Config, 'JUPITER_DEFAULT_SLIPPAGE_BPS') else 50))
                 last_valid_block_height_raw = trade_data.get('last_valid_block_height')
                 last_valid_block_height = int(last_valid_block_height_raw) if last_valid_block_height_raw is not None else None
                 confidence_score = float(trade_data.get('confidence_score', 0.0)) if trade_data.get('confidence_score') else None

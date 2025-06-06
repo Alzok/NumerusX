@@ -1,0 +1,1 @@
+{"name":"NumerusX Development","dockerComposeFile":"../docker-compose.yml","service":"backend","workspaceFolder":"/code","remoteUser":"root","forwardPorts":[8000,5173,6379],"customizations":{"vscode":{"extensions":["ms-python.python","ms-python.pylint","ms-azuretools.vscode-docker"]}}}

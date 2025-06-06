@@ -1,11 +1,9 @@
 import asyncio
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import sys
 import os
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Union
 
 # Ajouter le répertoire parent au chemin pour pouvoir importer les modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
